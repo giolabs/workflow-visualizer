@@ -204,3 +204,42 @@ test('isTicketKey accepts exactly one Jira-shaped key', () => {
   expect(isTicketKey('MH-1 OR 1=1')).toBe(false)
   expect(isTicketKey('../../etc')).toBe(false)
 })
+
+import { chooseModel, isPoweredOff, shouldChooseModel } from '../hooks/brain'
+
+test('the orchestrator picks a model tier from the task text, in English and Spanish', () => {
+  const pick = (description: string, prompt = '', subagentType = 'general-purpose') => chooseModel({ description, prompt, subagentType })
+  expect(pick('Research the repo for ADR references').tier).toBe('haiku') // the leading verb decides: reading ADRs is research
+  expect(pick('Write the ADR for the ingestion cutoff').tier).toBe('opus')
+  expect(pick('Search the repo and list the OpenSpec changes').tier).toBe('haiku')
+  expect(pick('Buscar en el repo los tickets de BO-548 y resumirlos').tier).toBe('haiku')
+  expect(pick('Implement the price-ingest cron').tier).toBe('sonnet')
+  expect(pick('Implementar el endpoint de login y sus pruebas').tier).toBe('sonnet')
+  expect(pick('Write unit tests for the handler').tier).toBe('sonnet')
+  expect(pick('Review PR #979 for regressions').tier).toBe('opus')
+  expect(pick('Revisar el PR 979').tier).toBe('opus')
+  expect(pick('Build the settings screen from the Figma').tier).toBe('opus') // UI named in the description wins over the verb
+  expect(pick('Fix the handler', 'Then adjust the settings screen copy').tier).toBe('sonnet')
+  expect(pick('synthesize', 'You are the synthesizer: consolidate the reports').tier).toBe('opus')
+  expect(pick('reader', 'uint parsing and prefix tables').tier).toBe('sonnet') // short words match whole: no "ui" in "uint", no "fix" in "prefix"
+  expect(pick('reader', '', 'Explore')).toEqual({ tier: 'haiku', reason: 'explore-type', matched: 'Explore' })
+  expect(pick('worker', '', 'Plan').tier).toBe('opus')
+  expect(pick('worker', '').reason).toBe('default')
+})
+
+test('the orchestrator only chooses when nobody fixed a model, never for forks, teammates, resumes or plugin agents', () => {
+  const base = { description: 'search', prompt: '', subagentType: 'general-purpose', model: undefined, fork: false, isTeammate: false, isResume: false }
+  expect(shouldChooseModel('auto', base)).toBe(true)
+  expect(shouldChooseModel('off', base)).toBe(false)
+  expect(shouldChooseModel('auto', { ...base, model: 'opus' })).toBe(false)
+  expect(shouldChooseModel('auto', { ...base, fork: true })).toBe(false)
+  expect(shouldChooseModel('auto', { ...base, isTeammate: true })).toBe(false)
+  expect(shouldChooseModel('auto', { ...base, isResume: true })).toBe(false)
+  expect(shouldChooseModel('auto', { ...base, subagentType: 'somnio-loop:worker-dev' })).toBe(false)
+})
+
+test('a finished agent powers off a minute after its report, a live one never', () => {
+  expect(isPoweredOff({ status: 'done', endedAt: 1_000 }, 61_000)).toBe(true)
+  expect(isPoweredOff({ status: 'failed', endedAt: 1_000 }, 60_999)).toBe(false)
+  expect(isPoweredOff({ status: 'running' }, 999_999)).toBe(false)
+})

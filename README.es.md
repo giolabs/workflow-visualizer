@@ -45,6 +45,7 @@ una sola vez las opciones del plugin:
 | --- | --- | --- |
 | Conversation language | `en`, `es` | Idioma del pane, los toasts, los reportes y los prompts de orquestación. El código y la documentación quedan en inglés. |
 | Default decision mode | `hitl`, `autonomous` | `hitl` pausa los runs del loop antes de cualquier push, PR o merge y pregunta; `autonomous` avanza y reporta cada decisión. |
+| Model choice for subagents | `auto`, `off` | `auto` elige el modelo de un subagente según su tarea cuando nadie lo fijó (ver [El razonamiento del orquestador](#el-razonamiento-del-orquestador)); `off` no lo toca nunca. |
 | Jira project key | p. ej. `MH` | Opcional. Habilita las métricas de sprint del sprint abierto del proyecto. |
 | Jira story points field | `customfield_10016` | Opcional. El campo custom que guarda los story points en tu Jira. |
 | Atlassian MCP server | `claude.ai Atlassian` | Opcional. El nombre del servidor MCP tal como lo lista `/mcp`. |
@@ -79,6 +80,20 @@ Para correrlo desde un checkout: `claude --plugin-dir /ruta/a/workflow-visualize
 
 Los costos son estimados a precio de lista por modelo (input, output, cache read y cache write con
 el TTL de 1 hora que usa Claude Code) y van marcados con `≈`; el de sesión lo da el propio engine.
+
+## El razonamiento del orquestador
+
+El plugin toma algunas decisiones por su cuenta sobre los agentes que observa (`hooks/brain.ts`):
+
+- **Modelo por tarea.** Cuando un subagente se lanza sin modelo (sin `model` en la llamada a Agent
+  ni en el script del Workflow), el plugin lee la tarea y elige el nivel que merece: investigación
+  de solo lectura → haiku; implementación y tests → sonnet; review, arquitectura/ADR, UI y síntesis →
+  opus. Los agentes `Explore` van a haiku y los `Plan` a opus; una tarea sin señal va a sonnet.
+  Decide la primera palabra que matchea, salvo review y UI nombrados en la descripción, que ganan
+  directo. Forks, teammates, runs resumidos y tipos de agente de otros plugins no se tocan. El log
+  del tile muestra la elección y la palabra que la disparó; `modelPolicy: off` lo desactiva.
+- **Apagado.** Un agente que terminó queda un minuto en el rack con su reporte y su costo y después
+  se apaga; el header cuenta los apagados y `/wv report` los conserva a todos.
 
 ## Objetivos desde tu repo (sin Jira)
 

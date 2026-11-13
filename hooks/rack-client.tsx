@@ -30,10 +30,13 @@ export type ClientAgent = {
   answer: string | null
   usd: number | null
   files: string[]
+  chosen: { tier: string; reason: string } | null
   objectives: { id: string; via: 'text' | 'file' | 'branch' }[]
 }
 
 export type SessionInfo = {
+  /** Finished agents that powered off the rack (still in the report). */
+  off: number
   contextPct: number | null
   costUsd: number | null
   workflows: number
@@ -295,7 +298,7 @@ const Rack: ClientModule<RackProps, Local> = (props, surface) => {
   const header = (
     <Box justifyContent="space-between">
       <Text bold color="claude">
-        {' '}🏟 {t.paneTitle.toUpperCase()} <Text dimColor>{t.rack} · {agents.length} {t.servers}</Text>
+        {' '}🏟 {t.paneTitle.toUpperCase()} <Text dimColor>{t.rack} · {agents.length} {t.servers}{props.session.off > 0 ? ` · ${props.session.off} ${t.poweredOff}` : ''}</Text>
       </Text>
       <Text>
         <Text dimColor>{props.session.live > 0 ? `${spin} ${props.session.live} ${t.online} · ` : ''}{t.sumAgents} </Text>
@@ -455,6 +458,12 @@ const Rack: ClientModule<RackProps, Local> = (props, surface) => {
           <Text dimColor>{t.nowLabel}</Text>
           <Text color={a.status === 'running' ? 'text' : 'inactive'}>{fit(a.doing, w - 7)}</Text>
         </Text>
+        {a.chosen ? (
+          <Text>
+            <Text dimColor>{t.chosenLabel}</Text>
+            {fit(`${a.model} · ${t.modelReason[a.chosen.reason] ?? a.chosen.reason}`, w - 8)}
+          </Text>
+        ) : null}
         {a.objectives.slice(0, 2).map(m => {
           const o = props.objectives[m.id]
           const color: Color = o?.phase === 'done' ? 'success' : o?.phase === 'active' ? 'warning' : o?.phase === 'dropped' ? 'inactive' : 'text'

@@ -34,6 +34,8 @@ export type RackAgent = {
   answer?: string
   /** Repo-relative or absolute paths the loop read, edited or wrote (last 40). */
   files: string[]
+  /** The model the plugin chose for this agent (nobody had fixed one) and the rule that chose it. */
+  chosen?: { tier: string; reason: string; matched: string }
 }
 
 /** One Workflow run (or the `solo` group of standalone Agent calls). */

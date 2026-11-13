@@ -45,6 +45,7 @@ once for the plugin's settings:
 | --- | --- | --- |
 | Conversation language | `en`, `es` | Language of the pane, toasts, reports and the orchestration prompts. Code and docs stay in English. |
 | Default decision mode | `hitl`, `autonomous` | `hitl` pauses loop runs before any push, PR or merge and asks; `autonomous` proceeds and reports every decision. |
+| Model choice for subagents | `auto`, `off` | `auto` picks a subagent's model from its task when nobody named one (see [The orchestrator's reasoning](#the-orchestrators-reasoning)); `off` never touches it. |
 | Jira project key | e.g. `MH` | Optional. Enables sprint metrics from the project's open sprint. |
 | Jira story points field | `customfield_10016` | Optional. The custom field holding story points in your Jira. |
 | Atlassian MCP server | `claude.ai Atlassian` | Optional. The MCP server name as `/mcp` lists it. |
@@ -79,6 +80,20 @@ To run it from a checkout instead: `claude --plugin-dir /path/to/workflow-visual
 
 Cost estimates use list prices per model (input, output, cache read, cache write at the 1-hour TTL
 Claude Code uses) and are marked `≈`; the session figure is the engine's own.
+
+## The orchestrator's reasoning
+
+The plugin takes a few decisions on its own about the agents it watches (`hooks/brain.ts`):
+
+- **Model per task.** When a subagent is spawned without a model (no `model` on the Agent call or
+  the Workflow script), the plugin reads the task and picks the tier it deserves: read-only
+  research → haiku; implementation and tests → sonnet; review, architecture/ADR, UI and synthesis →
+  opus. `Explore` agents default to haiku and `Plan` agents to opus; a task with no signal gets
+  sonnet. The earliest matching word decides, except review and UI work named in the description
+  win outright. Forks, teammates, resumed runs and plugin agent types are never touched. The tile's
+  log shows the choice and the word that triggered it; `modelPolicy: off` disables it.
+- **Power-off.** A finished agent stays a minute on the rack with its report and cost, then powers
+  off; the header counts the powered-off agents and `/wv report` keeps every one.
 
 ## Objectives from your repo (no Jira needed)
 
