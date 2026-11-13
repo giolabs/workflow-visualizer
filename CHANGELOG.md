@@ -6,6 +6,10 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Fixed
+- `/wv loop …` and `/wv <request>` open the rack pane with focus at once, instead of waiting for the
+  Workflow call to open it unfocused (which, outside fullscreen or under 110 columns, left it unseated).
+
 ## [0.4.0-beta.3] - 2026-11-13
 
 ### Added

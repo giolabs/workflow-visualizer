@@ -23,7 +23,7 @@ const SPAWN = {
 const RUN = (args: string) => ({ command: 'wv', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } }) as const
 
 /** The engine beneath the plugin: clock, session, store, an empty repo, no git. */
-function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: false }> = {}) {
+function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: false; opened: unknown[] }> = {}) {
   on('command.register', () => ({ value: { command: 'wv' } }))
   mock.clock(on, { now: 1_700_000_000_000 })
   on('session.model', () => ({ value: 'claude-fable-5-1' }))
@@ -31,7 +31,11 @@ function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: fals
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.repo', () => ({ value: null }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: 12 }, rateLimits: [], cost: { usd: 1.5 } } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    extra.opened?.push(e)
+
+    return { value: { isPlaced: true } }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
   if (extra.fs !== false) {
@@ -219,7 +223,8 @@ test('the JQL quotes the project key and a missing issue does not stop enrichmen
 })
 
 test('/wv <request> hands the orchestrator the exact Workflow call: verbatim script, request only in args', async ($, on) => {
-  world(on)
+  const opened: unknown[] = []
+  world(on, { opened })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
   const out = await $.command.run(RUN('Revisar los tickets de ADR-050'))
@@ -233,6 +238,7 @@ test('/wv <request> hands the orchestrator the exact Workflow call: verbatim scr
   expect(parsed.repoRoot).toBe('/repo')
   expect(parsed.language).toBe('en')
   expect(ctx).toMatch(/AskUserQuestion/)
+  expect(opened.some(o => (o as { focus?: true }).focus === true)).toBe(true)
 })
 
 test('/wv help shows the plugin version', async ($, on) => {

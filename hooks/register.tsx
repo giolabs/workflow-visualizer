@@ -489,7 +489,11 @@ export const register: Register = (on, options) => {
     const sub = resolved.sub
     const rest = restRaw
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
-    if (sub === 'loop') return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [loopPrompt(rest.join(' '), language, autonomy)] }
+    if (sub === 'loop') {
+      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+
+      return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [loopPrompt(rest.join(' '), language, autonomy)] }
+    }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
     if (sub === 'ask') {
@@ -498,6 +502,8 @@ export const register: Register = (on, options) => {
       // the user's /wv is the opt-in, the script travels verbatim and the request only in args.
       const repo = await $.session.repo().catch(() => null)
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
+      // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
+      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
 
       return { text: t.askLaunched(clip(args, 80)), context: [launchPrompt(args, language, askArgs)] }
     }
