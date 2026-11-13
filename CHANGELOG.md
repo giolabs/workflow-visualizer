@@ -6,6 +6,16 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.2] - 2026-11-13
+
+Second public beta: the security-audit fixes and a usable `/wv` dispatcher.
+
+### Fixed
+- `/wv loop <tickets>` and plain-word requests after `/wv` are delivered to the orchestrator as
+  hidden context instead of being printed as the command's output; typos in subcommands are
+  corrected by edit distance (`objetives` → `objectives`), `/wv config` points to `/config`, and a
+  lone unknown word is reported with a pointer to `/wv help`.
+
 ### Security
 - `statusOf` parses the status from one bounded line with bounded whitespace classes: a crafted
   ADR/spec with `**Status**` followed by a long whitespace run no longer backtracks cubically and
