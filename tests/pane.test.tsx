@@ -29,8 +29,10 @@ const SPAWN = {
 
 function world(on: On) {
   const submitted: string[] = []
+  const session = mock.session(on)
   on('prompt.submit', (_, e) => {
-    submitted.push(e.text)
+    const notes = session.appended().filter(r => r.door === 'note').map(r => r.message.content.map(b => ('text' in b ? b.text : '')).join(''))
+    submitted.push([e.text, ...notes].join('\n'))
 
     return { text: e.text, origin: e.origin }
   })

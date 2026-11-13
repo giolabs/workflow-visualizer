@@ -18,7 +18,8 @@ import { usdOf } from './pricing'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
 
-const PANE = 'workflow-visualizer'
+const PLUGIN = 'workflow-visualizer'
+const PANE = PLUGIN
 const COMMAND = 'wv'
 const SOLO = 'solo'
 const MAIN = 'main'
@@ -350,7 +351,7 @@ let scanInFlight: Promise<RackCatalog | undefined> | null = null
  * wait on), so the submit runs in a timer callback under the session's `$`, after the
  * command answered. Fire and forget: a refusal is reported as a toast.
  */
-let launchTurn: ((text: string, onRefused: string) => void) | null = null
+let launchTurn: ((text: string, context: readonly string[], onRefused: string) => void) | null = null
 let scanPending = false
 
 async function refreshCatalog($: ScanDollar, force = false): Promise<RackCatalog | undefined> {
@@ -454,9 +455,12 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
-    launchTurn = (text, onRefused) => {
+    launchTurn = (text, context, onRefused) => {
       $.clock.after(0, () => {
-        void $.prompt.submit({ text })
+        // The long instructions (the whole wv-ask script among them) go in as a hidden user row the
+        // model reads and the person never sees; the prompt that starts the turn is one line.
+        void Promise.all(context.map(block => $.session.append({ message: { type: 'user', content: [{ type: 'text', text: block }] } })))
+          .then(() => $.prompt.submit({ text }))
           .then(entered => ('drop' in entered ? $.ui.toast(`${onRefused} ${String(entered.drop)}`) : undefined))
           .catch((err: unknown) => $.ui.toast(`${onRefused} ${err instanceof Error ? err.message : String(err)}`))
       })
@@ -502,12 +506,13 @@ export const register: Register = (on, options) => {
     const rest = restRaw
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
     if (sub === 'loop') {
-      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+      const seat = await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason)}`
       const prompt = loopPrompt(rest.join(' '), language, autonomy)
-      if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [prompt] }
-      launchTurn(prompt, t.launchRefused)
+      if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, context: [prompt] }
+      launchTurn(`${t.loopStarting(rest.join(' '))} (/wv loop)`, [prompt], t.launchRefused)
 
-      return { text: `${t.loopStarting(rest.join(' '))}${note}`, isTextDisplayOnly: true }
+      return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, isTextDisplayOnly: true }
     }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
@@ -518,14 +523,15 @@ export const register: Register = (on, options) => {
       const repo = await $.session.repo().catch(() => null)
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
       // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
-      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
-      // The script travels verbatim in the prompt: a file under the repo could be swapped or
-      // symlinked between the write and the Workflow run, and the engine would execute it.
+      const seat = await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason)}`
+      // The script travels verbatim in the hidden context: a file under the repo could be swapped
+      // or symlinked between the write and the Workflow run, and the engine would execute it.
       const prompt = launchPrompt(args, language, askArgs)
-      if (!launchTurn) return { text: t.askLaunched(clip(args, 80)), context: [prompt] }
-      launchTurn(prompt, t.launchRefused)
+      if (!launchTurn) return { text: `${t.askLaunched(clip(args, 80))}${seatNote}`, context: [prompt] }
+      launchTurn(`${t.askLaunched(clip(args, 80))} (/wv)`, [prompt], t.launchRefused)
 
-      return { text: t.askLaunched(clip(args, 80)), isTextDisplayOnly: true }
+      return { text: `${t.askLaunched(clip(args, 80))}${seatNote}`, isTextDisplayOnly: true }
     }
     if (sub === 'unknown') return { text: t.unknownSubcommand(first), isTextDisplayOnly: true }
     if (sub === 'objectives') {
@@ -871,8 +877,16 @@ export const register: Register = (on, options) => {
     const catalog = state.objectives
     const agents = state.agents.map(a => toClient(a, runName(a.runKey), catalog))
     const main = toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog)
+    // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
+    // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
+    const named = new Set<string>()
+    for (const a of [main, ...agents]) for (const m of a.objectives) named.add(m.id)
     const objectives: Record<string, ClientObjective> = {}
-    for (const o of catalog?.items ?? []) objectives[o.id] = { id: o.id, kind: o.kind, title: o.title, status: o.status, phase: o.phase }
+    for (const o of catalog?.items ?? []) if (named.has(o.id)) objectives[o.id] = { id: o.id, kind: o.kind, title: clip(o.title, 80), status: o.status, phase: o.phase }
+    const mentioned = new Set<string>()
+    for (const a of [main, ...agents]) for (const key of Object.keys(state.tickets)) if (a.description.includes(key) || a.task.includes(key)) mentioned.add(key)
+    const tickets: Record<string, RackTicket> = {}
+    for (const key of mentioned) tickets[key] = state.tickets[key]!
     const session: SessionInfo = {
       contextPct,
       costUsd,
@@ -887,7 +901,7 @@ export const register: Register = (on, options) => {
 
     if (e.surface === 'terminal' || e.surface === 'desktop') {
       const { Box, Client } = $.ui.resolve(e)
-      const props: RackProps = { now, language, main, agents, session, tickets: state.tickets, objectives, branch: catalog?.branch ?? null }
+      const props: RackProps = { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
 
       return (
         <Box flexDirection="column">

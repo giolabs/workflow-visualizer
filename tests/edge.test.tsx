@@ -41,9 +41,11 @@ function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: fals
 
     return { value: undefined }
   })
+  const session = mock.session(on)
   on('prompt.submit', (_, e) => {
     if (extra.dropPrompts) return { drop: 'not now' }
-    extra.submitted?.push(e.text)
+    const notes = session.appended().filter(r => r.door === 'note').map(r => r.message.content.map(b => ('text' in b ? b.text : '')).join(''))
+    extra.submitted?.push([e.text, ...notes].join('\n---\n'))
 
     return { text: e.text, origin: e.origin }
   })
@@ -254,6 +256,7 @@ test('/wv <request> submits the launch prompt with the script inline, after the 
   expect(Object.keys(written)).toEqual([])
   expect(submitted.length).toBe(1)
   const prompt = submitted[0] ?? ''
+  expect(prompt.split('\n---\n')[0]).toBe('Launching the wv-ask workflow for: Revisar los tickets de ADR-050 — 3 researchers (repo, Jira, git) + 1 synthesizer; watch them in the rack. (/wv)')
   expect(prompt).toMatch(/call the Workflow tool NOW/)
   expect(prompt).toMatch(/name: 'wv-ask'/)
   const script = prompt.slice(prompt.indexOf('export const meta'), prompt.indexOf('Workflow input `args`'))
@@ -295,4 +298,29 @@ test('/wv help shows the plugin version', async ($, on) => {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const out = await $.command.run(RUN('help'))
   expect(out.text).toMatch(/^workflow-visualizer 0\.4\.0/)
+})
+
+test('a repository with hundreds of long-titled artifacts still draws the rack (Client props stay small)', async ($, on) => {
+  world(on, { fs: false })
+  const files = Array.from({ length: 400 }, (_, i) => ({ name: `ADR-${String(i).padStart(3, '0')}-${'decision-with-a-very-long-slug-'.repeat(4)}.md`, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false }))
+  on('fs.list', (_, e) => {
+    const p = e.path ?? '/repo'
+    if (p === '/repo') return { value: [{ name: 'docs', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs') return { value: [{ name: 'adr', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs/adr') return { value: files }
+
+    return { value: [] }
+  })
+  on('fs.exists', () => ({ value: false }))
+  on('fs.read', () => ({ value: `# ${'A long architectural decision title about ingestion '.repeat(5)}\n\nStatus: accepted\n` }))
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag-big' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const scanned = await $.command.run(RUN('objectives rescan'))
+  expect(scanned.text).toMatch(/adr\s+400/)
+  await $.agent.spawn({ ...SPAWN, description: 'Implement ADR-007', prompt: 'Follow ADR-007 and ADR-008' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /1 servers/, in: 'rack' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /ADR-007/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
 })

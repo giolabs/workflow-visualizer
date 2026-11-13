@@ -16,6 +16,7 @@ export type Strings = {
   askStarting: string
   askLaunched: (request: string) => string
   launchRefused: string
+  paneWaiting: (reason: string) => string
   versionLine: (version: string) => string
   interpretedAs: (sub: string) => string
   configHint: string
@@ -122,6 +123,7 @@ const en: Strings = {
   askStarting: 'Handing your request to the orchestrator with the visualizer context…',
   askLaunched: request => `Launching the wv-ask workflow for: ${request} — 3 researchers (repo, Jira, git) + 1 synthesizer; watch them in the rack.`,
   launchRefused: 'workflow-visualizer could not start the turn:',
+  paneWaiting: reason => `The rack pane is not drawn yet (${reason}); widen the terminal or run /wv to open it.`,
   versionLine: version => `workflow-visualizer ${version}`,
   interpretedAs: sub => `(read as "${sub}")`,
   configHint: 'Settings live in /config → workflow-visualizer (language, decision mode, Jira project, points field, MCP server).',
@@ -225,6 +227,7 @@ const es: Strings = {
   askStarting: 'Pasando tu pedido al orquestador con el contexto del visualizer…',
   askLaunched: request => `Lanzando el workflow wv-ask para: ${request} — 3 investigadores (repo, Jira, git) + 1 sintetizador; miralos en el rack.`,
   launchRefused: 'workflow-visualizer no pudo arrancar el turno:',
+  paneWaiting: reason => `El rack todavía no se dibuja (${reason}); ensanchá la terminal o corré /wv para abrirlo.`,
   versionLine: version => `workflow-visualizer ${version}`,
   interpretedAs: sub => `(leído como "${sub}")`,
   configHint: 'La configuración está en /config → workflow-visualizer (idioma, modo de decisión, proyecto Jira, campo de puntos, servidor MCP).',
