@@ -1,0 +1,13 @@
+{
+  "name": "workflow-visualizer",
+  "owner": {
+    "name": "Giolabs"
+  },
+  "plugins": [
+    {
+      "name": "workflow-visualizer",
+      "source": "./"
+    }
+  ],
+  "description": "Live console and delivery metrics for agentic work in Claude Code: the orchestrator and every agent as servers in a rack, with tokens, cost, repo objectives and the loop-mode skill."
+}

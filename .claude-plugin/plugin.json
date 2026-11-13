@@ -1,0 +1,45 @@
+{
+  "name": "workflow-visualizer",
+  "version": "0.4.0",
+  "description": "Live console for agentic work: the orchestrator and every agent as servers in a rack (status, what they are doing, tokens, cost), plus the loop-mode orchestration skill and delivery metrics from your repo's ADRs, specs and tickets.",
+  "author": { "name": "Giolabs", "url": "https://github.com/giolabs" },
+  "homepage": "https://github.com/giolabs/workflow-visualizer",
+  "repository": "https://github.com/giolabs/workflow-visualizer",
+  "license": "MIT",
+  "keywords": ["claude-code", "plugin", "agents", "workflow", "observability", "tokens", "cost", "dora", "adr", "openspec", "jira", "loop-mode"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Conversation language",
+      "description": "Conversation language for the visualizer UI and its orchestration prompts (code and docs stay in English).",
+      "options": ["en", "es"],
+      "default": "en"
+    },
+    "autonomy": {
+      "type": "string",
+      "title": "Default decision mode",
+      "description": "Default decision mode for loop runs: 'hitl' pauses before push/PR/merge and asks; 'autonomous' proceeds and reports.",
+      "options": ["hitl", "autonomous"],
+      "default": "hitl"
+    },
+    "jiraProject": {
+      "type": "string",
+      "title": "Jira project key",
+      "description": "Project key (e.g. MH) whose open sprint feeds the objectives metrics; empty disables sprint metrics.",
+      "default": ""
+    },
+    "jiraPointsField": {
+      "type": "string",
+      "title": "Jira story points field",
+      "description": "Custom field id holding story points (commonly customfield_10016).",
+      "default": "customfield_10016"
+    },
+    "jiraServer": {
+      "type": "string",
+      "title": "Atlassian MCP server",
+      "description": "Name of the connected Atlassian MCP server as /mcp lists it.",
+      "default": "claude.ai Atlassian"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# Laid by the engine on load; regenerated, never committed
+.claude-plugin/types/
+tsconfig.json
+
+# Reports a session saves
+.workflow-visualizer/
+
+# OS and editors
+.DS_Store
+*~
+*.swp
+*.log
+node_modules/
