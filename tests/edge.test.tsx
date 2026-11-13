@@ -324,3 +324,16 @@ test('a repository with hundreds of long-titled artifacts still draws the rack (
   expect(await ui.find({ type: 'Text', text: /ADR-007/, in: 'rack' })).toBeDefined()
   await ui.unmount()
 })
+
+test('an agent whose spawn the plugin never saw (a skill in a subagent) gets a tile from its first turn', async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [{ id: 'ag-review', description: 'code-review high #979', type: 'general-purpose', status: 'running' }] }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  await $.turn.start({ agentId: 'ag-review', turnId: 'turn-r1', text: 'Review PR #979 for regressions' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /1 servers/, in: 'rack' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /code-review high/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
+})

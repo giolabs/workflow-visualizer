@@ -130,6 +130,36 @@ function freshMain(now: number, model: string, t: Strings): RackAgent {
 }
 
 /** Applies `fn` to the loop `id` names: the orchestrator or one agent. */
+/** A tile for an agent whose spawn this plugin did not see (a skill run in a subagent, an agent started before the plugin loaded). */
+function adopted(id: string, now: number, model: string, info: { description: string; type: string; parentId?: string } | undefined, prompt: string, t: Strings): RackAgent {
+  const type = info?.type ?? 'agent'
+
+  return {
+    id,
+    runKey: SOLO,
+    index: 0,
+    parentId: info?.parentId,
+    description: clip(info?.description || prompt || type, 200),
+    task: clip(prompt, 600),
+    type,
+    model,
+    status: 'running',
+    phase: 'thinking',
+    startedAt: now,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    steps: 0,
+    tools: 0,
+    turns: 1,
+    doing: t.readingYourMessage,
+    log: [{ at: now, text: t.adoptedAs(type) }],
+    history: [],
+    files: [],
+  }
+}
+
 function touch(
   s: RackState,
   id: string,
@@ -692,6 +722,22 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const model = await $.session.model()
     lastPhase.set(id, 'boot')
+    const known = id === MAIN || (await read($, rack)).agents.some(a => a.id === id)
+    if (!known) {
+      // A subagent the spawn hook never saw (a skill running in a subagent, a spawn before the plugin
+      // loaded): give it a tile from what the engine lists, so every running agent shows in the rack.
+      const info = (await $.agent.list().catch(() => [])).find(a => a.id === id)
+      const tile = adopted(id, now, model, info, e.text, t)
+      void $.ui.open({ id: PANE, title: t.paneTitle })
+      await update($, rack, s => {
+        const runs = s.runs.some(r => r.key === SOLO) ? s.runs : [...s.runs, { key: SOLO, name: t.soloRun, startedAt: now }]
+
+        return { ...s, runs, agents: capAgents([...s.agents.filter(a => a.id !== id), tile]) }
+      })
+      enrich($, jira, ticketsOf(tile.description, tile.task), now)
+
+      return next(e)
+    }
     await update($, rack, s =>
       touch(s, id, now, model, t, a => {
         if (id === MAIN) {

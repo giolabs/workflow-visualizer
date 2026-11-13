@@ -33,6 +33,7 @@ export type Strings = {
   writingAnswerAgent: string
   booting: string
   bootedAs: (type: string) => string
+  adoptedAs: (type: string) => string
   launched: (mascot: string, desc: string) => string
   received: (mascot: string, desc: string) => string
   failedChild: (mascot: string, desc: string) => string
@@ -140,6 +141,7 @@ const en: Strings = {
   writingAnswerAgent: 'Writing its answer',
   booting: 'Booting…',
   bootedAs: t => `Booted as ${t}`,
+  adoptedAs: t => `Found running as ${t} (spawned outside the plugin's view)`,
   launched: (m, d) => `Launched ${m} ${d}`,
   received: (m, d) => `Received ${m} ${d}`,
   failedChild: (m, d) => `Failed ${m} ${d}`,
@@ -244,6 +246,7 @@ const es: Strings = {
   writingAnswerAgent: 'Escribiendo su respuesta',
   booting: 'Arrancando…',
   bootedAs: t => `Encendido como ${t}`,
+  adoptedAs: t => `Encontrado corriendo como ${t} (lanzado fuera de la vista del plugin)`,
   launched: (m, d) => `Lanzó ${m} ${d}`,
   received: (m, d) => `Recibió ${m} ${d}`,
   failedChild: (m, d) => `Falló ${m} ${d}`,
