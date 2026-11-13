@@ -6,6 +6,11 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Fixed
+- Agents whose spawn the plugin did not see (a skill running in a subagent such as `/code-review`,
+  an agent started before the plugin loaded) now get a tile at their first turn, named from the
+  engine's agent list, so every agent running in the session shows in the rack.
+
 ## [0.4.0-beta.5] - 2026-11-13
 
 ### Fixed
