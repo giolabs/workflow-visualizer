@@ -27,6 +27,7 @@ git rev-parse -q --verify "refs/tags/v$version" >/dev/null && { echo "tag v$vers
 
 current="$(node -p "JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf8')).version")"
 [ "$current" = "$version" ] || { echo "plugin.json is at $current, not $version: merge the release PR first" >&2; exit 1; }
+grep -q "VERSION = '$version'" hooks/version.ts || { echo "hooks/version.ts does not carry $version" >&2; exit 1; }
 grep -q "^## \[$version\] - " CHANGELOG.md || { echo "CHANGELOG.md has no '## [$version] - <date>' section" >&2; exit 1; }
 
 git tag -a "v$version" -m "workflow-visualizer v$version"

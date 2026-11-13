@@ -137,12 +137,29 @@ test('with no git and no artifacts, objectives says so instead of failing', asyn
   expect(out.text).toMatch(/No objective artifacts in \/repo/)
 })
 
-test('/wv with an unknown subcommand opens the pane and says so', async ($, on) => {
+test('/wv forgives typos, points config to /config and hands plain-word requests to the model', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  const out = await $.command.run(RUN('whatever'))
-  expect(out.text).toBe('Workflow Visualizer opened.')
+  const typo = await $.command.run(RUN('objetives'))
+  expect(typo.text).toMatch(/No objective artifacts/)
+  expect(typo.text).toMatch(/read as "objectives"/)
+  expect(typo.isTextDisplayOnly).toBe(true)
+
+  const cfg = await $.command.run(RUN('cofig'))
+  expect(cfg.text).toMatch(/\/config → workflow-visualizer/)
+
+  const ask = await $.command.run(RUN('Ver los tickets del ADR-050 que esten en backlog'))
+  expect(ask.text).toMatch(/Launching the wv-ask workflow for: Ver los tickets del ADR-050/)
+  expect(ask.isTextDisplayOnly).toBeUndefined()
+  expect(ask.context?.[0]).toMatch(/call the Workflow tool NOW/)
+  expect(ask.context?.[0]).toMatch(/name: 'wv-ask'/)
+
+  const unknown = await $.command.run(RUN('whatever'))
+  expect(unknown.text).toMatch(/Unknown subcommand "whatever"/)
+
+  const open = await $.command.run(RUN(''))
+  expect(open.text).toBe('Workflow Visualizer opened.')
 })
 
 test('a symlinked artifact directory is not followed and a bad jiraProject disables sprint metrics', { options: { jiraProject: 'MH OR 1=1' } }, async ($, on) => {
@@ -199,4 +216,28 @@ test('the JQL quotes the project key and a missing issue does not stop enrichmen
   expect(jql[0]).toMatch(/project = "MH" AND sprint in openSprints\(\)/)
   expect(issues).toContain('ISO-8601')
   expect(issues).toContain('MH-5')
+})
+
+test('/wv <request> hands the orchestrator the exact Workflow call: verbatim script, request only in args', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const out = await $.command.run(RUN('Revisar los tickets de ADR-050'))
+  const ctx = out.context?.[0] ?? ''
+  const script = ctx.slice(ctx.indexOf('```js') + 5, ctx.indexOf('```', ctx.indexOf('```js') + 5))
+  expect(script).toMatch(/export const meta = \{\s*name: 'wv-ask'/)
+  expect(script).not.toMatch(/ADR-050/)
+  const argsLine = ctx.split('\n').find(l => l.startsWith('Workflow input `args`')) ?? ''
+  const parsed = JSON.parse(argsLine.slice(argsLine.indexOf('{')))
+  expect(parsed.request).toBe('Revisar los tickets de ADR-050')
+  expect(parsed.repoRoot).toBe('/repo')
+  expect(parsed.language).toBe('en')
+  expect(ctx).toMatch(/AskUserQuestion/)
+})
+
+test('/wv help shows the plugin version', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const out = await $.command.run(RUN('help'))
+  expect(out.text).toMatch(/^workflow-visualizer 0\.4\.0/)
 })

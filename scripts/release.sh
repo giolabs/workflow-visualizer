@@ -42,6 +42,8 @@ node -e '
   const m = JSON.parse(fs.readFileSync(p, "utf8"))
   m.version = process.argv[1]
   fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n")
+  const v = "hooks/version.ts"
+  fs.writeFileSync(v, fs.readFileSync(v, "utf8").replace(/VERSION = '[^']*'/, "VERSION = '" + process.argv[1] + "'"))
 ' "$version"
 
 # CHANGELOG: the Unreleased notes become this version's section; a fresh Unreleased stays on top.
@@ -63,7 +65,7 @@ node -e '
 claude plugin validate . >/dev/null
 claude plugin test . | tail -2
 
-git add .claude-plugin/plugin.json CHANGELOG.md
+git add .claude-plugin/plugin.json hooks/version.ts CHANGELOG.md
 git commit -q -m "release: v$version"
 git push -q -u origin "$release_branch"
 

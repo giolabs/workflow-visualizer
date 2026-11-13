@@ -6,6 +6,18 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Added
+- `/wv <request in plain words>` launches the plugin's own `wv-ask` Workflow: three research
+  agents in parallel (repository artifacts, Jira through the Atlassian MCP, git history) and a
+  synthesizer that answers in the configured language. The command hands the orchestrator the exact
+  Workflow call (script verbatim, the request only in `args`); the run shows in the rack and the
+  orchestrator relays the synthesis.
+- `/wv help` shows the plugin version (`hooks/version.ts`, bumped by `scripts/release.sh`).
+
+### Fixed
+- Restored the `/wv` dispatcher fix that beta.2 missed: `loop` and plain-word requests reach the
+  model as hidden context instead of being printed; typos are corrected; `config` points to `/config`.
+
 ### Changed
 - Releases are prepared as a pull request (`scripts/release.sh` bumps the version and stamps the
   CHANGELOG section on a `release/v<version>` branch) and tagged after the merge with
