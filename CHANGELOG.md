@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.5] - 2026-11-13
+
 ### Fixed
 - The prompt that starts the turn for `/wv loop …` and `/wv <request>` is one line; the instructions
   and the `wv-ask` script go in as hidden user rows (`$.session.append`) the model reads and the
