@@ -43,7 +43,8 @@ node -e '
   m.version = process.argv[1]
   fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n")
   const v = "hooks/version.ts"
-  fs.writeFileSync(v, fs.readFileSync(v, "utf8").replace(/VERSION = '[^']*'/, "VERSION = '" + process.argv[1] + "'"))
+  const q = String.fromCharCode(39)
+  fs.writeFileSync(v, fs.readFileSync(v, "utf8").replace(new RegExp("VERSION = " + q + "[^" + q + "]*" + q), "VERSION = " + q + process.argv[1] + q))
 ' "$version"
 
 # CHANGELOG: the Unreleased notes become this version's section; a fresh Unreleased stays on top.
