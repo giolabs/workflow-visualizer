@@ -12,6 +12,9 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
   transcript does not show.
 - When the rack pane cannot be drawn yet, the command says so with the engine's reason instead of
   staying silent.
+- The rack pane came up blank in repositories with a large artifact catalog: the Client props
+  carried every objective and serialised past the engine's 100k-character bound, so the render
+  was skipped. Only the objectives and tickets some agent names reach the Client now.
 
 ## [0.4.0-beta.4] - 2026-11-13
 

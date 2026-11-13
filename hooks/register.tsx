@@ -877,8 +877,16 @@ export const register: Register = (on, options) => {
     const catalog = state.objectives
     const agents = state.agents.map(a => toClient(a, runName(a.runKey), catalog))
     const main = toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog)
+    // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
+    // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
+    const named = new Set<string>()
+    for (const a of [main, ...agents]) for (const m of a.objectives) named.add(m.id)
     const objectives: Record<string, ClientObjective> = {}
-    for (const o of catalog?.items ?? []) objectives[o.id] = { id: o.id, kind: o.kind, title: o.title, status: o.status, phase: o.phase }
+    for (const o of catalog?.items ?? []) if (named.has(o.id)) objectives[o.id] = { id: o.id, kind: o.kind, title: clip(o.title, 80), status: o.status, phase: o.phase }
+    const mentioned = new Set<string>()
+    for (const a of [main, ...agents]) for (const key of Object.keys(state.tickets)) if (a.description.includes(key) || a.task.includes(key)) mentioned.add(key)
+    const tickets: Record<string, RackTicket> = {}
+    for (const key of mentioned) tickets[key] = state.tickets[key]!
     const session: SessionInfo = {
       contextPct,
       costUsd,
@@ -893,7 +901,7 @@ export const register: Register = (on, options) => {
 
     if (e.surface === 'terminal' || e.surface === 'desktop') {
       const { Box, Client } = $.ui.resolve(e)
-      const props: RackProps = { now, language, main, agents, session, tickets: state.tickets, objectives, branch: catalog?.branch ?? null }
+      const props: RackProps = { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
 
       return (
         <Box flexDirection="column">
