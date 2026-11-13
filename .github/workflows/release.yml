@@ -1,0 +1,61 @@
+# Tag-driven releases.
+#
+#   scripts/release.sh 0.4.0-beta.1     # bumps plugin.json, commits, tags v0.4.0-beta.1, pushes
+#
+# Pushing a `v*` tag runs this: the plugin is validated and tested with the
+# Claude Code CLI, the CHANGELOG section for that version becomes the release
+# notes, and a GitHub release is published. A tag with a pre-release suffix
+# (`-beta.1`, `-rc.2`) becomes a pre-release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Tag is a release tag and matches plugin.json
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || { echo "not a release tag: $GITHUB_REF_NAME" >&2; exit 1; }
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "tag v$tag does not match plugin.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Validate plugin
+        run: claude plugin validate .
+
+      - name: Run plugin tests
+        run: claude plugin test .
+
+      - name: Release notes from CHANGELOG
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/changelog-section.mjs "$version" > RELEASE_NOTES.md
+          test -s RELEASE_NOTES.md || { echo "no CHANGELOG section for $version" >&2; exit 1; }
+          if [[ "$version" == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--title "workflow-visualizer ${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md --verify-tag)
+          if [ "${{ steps.notes.outputs.prerelease }}" = "true" ]; then args+=(--prerelease); fi
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md || gh release create "$GITHUB_REF_NAME" "${args[@]}"

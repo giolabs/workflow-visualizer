@@ -2,10 +2,14 @@
 
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow semver.
+Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared stable.
 
-## [0.4.0] - 2026-11-13
+## [Unreleased]
 
-First public release.
+## [0.4.0-beta.1] - 2026-11-13
+
+First public beta. Try it, open issues; the API, state shape and report layout may still move
+before 0.4.0.
 
 ### Added
 - Rack pane: the orchestrator and every agent as server tiles with status LED, plain-language
@@ -21,3 +25,9 @@ First public release.
 - Bundled `loop-mode` skill driven by the plugin's language and decision mode (`hitl` / `autonomous`).
 - Cost estimates at list price per model, cache write at the 1-hour TTL.
 - 28 kit tests (hooks, UI, parsers, golden reports, edge cases) and a headless E2E script.
+- Tag-driven releases: `scripts/release.sh` and the `release` GitHub workflow.
+
+### Security
+- The bundled `loop-mode` workflow validates ticket keys, slugs and branch names before any git
+  command, writes commit messages through a file instead of a shell line, and hands Jira text to
+  agents as JSON-encoded untrusted data; autonomous runs show the ticket text to the user first.

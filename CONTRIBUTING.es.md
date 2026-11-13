@@ -55,5 +55,18 @@ transcript cuando falla un hook.
 
 ## Commits y releases
 
-Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`). Las versiones siguen semver en
-`.claude-plugin/plugin.json`; `CHANGELOG.md` tiene una entrada por release.
+Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`). Los commits llevan como autor a la
+persona que impulsa el cambio, con líneas `Co-Authored-By:` para quien (o el modelo que) lo
+coescribió.
+
+Los releases se disparan por tag:
+
+1. Agregá una sección `## [<versión>] - <fecha>` a `CHANGELOG.md` (movés lo que había en `[Unreleased]`).
+2. En un `main` limpio y sincronizado, corré `scripts/release.sh <versión>`: sube la versión en
+   `.claude-plugin/plugin.json`, commitea `release: v<versión>`, crea el tag `v<versión>` y pushea.
+3. El workflow `release` de GitHub valida y testea el plugin, toma la sección del CHANGELOG como
+   notas y publica el release. Una versión con sufijo (`0.5.0-beta.1`, `0.5.0-rc.1`) se publica como
+   **pre-release**; las betas son la forma de probar una versión antes de declararla estable.
+
+Una versión concreta se instala con
+`/plugin install workflow-visualizer@<versión> --marketplace giolabs/workflow-visualizer`.
