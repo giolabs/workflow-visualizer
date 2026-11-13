@@ -59,14 +59,22 @@ Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`). Los commits llevan com
 persona que impulsa el cambio, con líneas `Co-Authored-By:` para quien (o el modelo que) lo
 coescribió.
 
-Los releases se disparan por tag:
+**Todo cambio llega a `main` por pull request**: código, docs, CHANGELOG y subas de versión por
+igual. Un ruleset sobre `main` exige PR y bloquea force push y borrado, sin bypass.
 
-1. Agregá una sección `## [<versión>] - <fecha>` a `CHANGELOG.md` (movés lo que había en `[Unreleased]`).
-2. En un `main` limpio y sincronizado, corré `scripts/release.sh <versión>`: sube la versión en
-   `.claude-plugin/plugin.json`, commitea `release: v<versión>`, crea el tag `v<versión>` y pushea.
-3. El workflow `release` de GitHub valida y testea el plugin, toma la sección del CHANGELOG como
-   notas y publica el release. Una versión con sufijo (`0.5.0-beta.1`, `0.5.0-rc.1`) se publica como
-   **pre-release**; las betas son la forma de probar una versión antes de declararla estable.
+Los releases se preparan como PR y se taggean después del merge:
+
+1. Anotá las novedades bajo `## [Unreleased]` en `CHANGELOG.md` a medida que avanzás.
+2. En un `main` limpio y sincronizado, corré `scripts/release.sh <versión>`: crea
+   `release/v<versión>`, sube la versión en `.claude-plugin/plugin.json`, convierte las notas de
+   `[Unreleased]` en `## [<versión>] - <fecha>`, commitea, pushea y abre el PR del release.
+3. Revisá y mergeá ese PR. Después, en un `main` actualizado, corré
+   `scripts/tag-release.sh <versión>`: verifica que `plugin.json` y el CHANGELOG tengan la versión y
+   pushea el tag `v<versión>`.
+4. El workflow `release` corre un job `verify` de solo lectura (tag alcanzable desde `main`, versión
+   coincidente, validate, tests) y un job `publish` que crea el release desde la sección del
+   CHANGELOG. Una versión con sufijo (`0.5.0-beta.1`, `0.5.0-rc.1`) se publica como **pre-release**;
+   las betas son la forma de probar una versión antes de declararla estable.
 
 Una versión concreta se instala con
 `/plugin install workflow-visualizer@<versión> --marketplace giolabs/workflow-visualizer`.

@@ -1,6 +1,7 @@
 # Tag-driven releases.
 #
-#   scripts/release.sh 0.4.0-beta.1     # bumps plugin.json, commits, tags v0.4.0-beta.1, pushes
+#   scripts/release.sh 0.4.0-beta.2      # release PR: bump + CHANGELOG section
+#   scripts/tag-release.sh 0.4.0-beta.2  # after the merge: tags v0.4.0-beta.2 on main
 #
 # Pushing a `v*` tag runs this in two jobs. `verify` runs with a read-only token and no
 # persisted credentials: it checks the tag is a release tag reachable from `main`, that it
