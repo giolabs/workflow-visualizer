@@ -1,6 +1,6 @@
 {
   "name": "workflow-visualizer",
-  "version": "0.4.0-beta.6",
+  "version": "0.4.0-beta.7",
   "description": "Live console for agentic work: the orchestrator and every agent as servers in a rack (status, what they are doing, tokens, cost), plus the loop-mode orchestration skill and delivery metrics from your repo's ADRs, specs and tickets.",
   "author": {
     "name": "Giolabs",
