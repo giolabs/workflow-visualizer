@@ -23,7 +23,7 @@ const SPAWN = {
 const RUN = (args: string) => ({ command: 'wv', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } }) as const
 
 /** The engine beneath the plugin: clock, session, store, an empty repo, no git. */
-function world(on: On, extra: Partial<{ store: Record<string, unknown> }> = {}) {
+function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: false }> = {}) {
   on('command.register', () => ({ value: { command: 'wv' } }))
   mock.clock(on, { now: 1_700_000_000_000 })
   on('session.model', () => ({ value: 'claude-fable-5-1' }))
@@ -34,9 +34,11 @@ function world(on: On, extra: Partial<{ store: Record<string, unknown> }> = {}) 
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
-  on('fs.list', () => ({ value: [] }))
-  on('fs.exists', () => ({ value: false }))
-  on('fs.read', () => ({ value: '' }))
+  if (extra.fs !== false) {
+    on('fs.list', () => ({ value: [] }))
+    on('fs.exists', () => ({ value: false }))
+    on('fs.read', () => ({ value: '' }))
+  }
   on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }))
   mock.store(on, extra.store)
 }
@@ -141,4 +143,60 @@ test('/wv with an unknown subcommand opens the pane and says so', async ($, on) 
 
   const out = await $.command.run(RUN('whatever'))
   expect(out.text).toBe('Workflow Visualizer opened.')
+})
+
+test('a symlinked artifact directory is not followed and a bad jiraProject disables sprint metrics', { options: { jiraProject: 'MH OR 1=1' } }, async ($, on) => {
+  world(on, { fs: false })
+  on('fs.list', (_, e) => {
+    const p = e.path ?? '/repo'
+    if (p === '/repo') return { value: [{ name: 'docs', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs') return { value: [{ name: 'adr', kind: 'dir', size: 0, mtimeMs: 0, isLink: true }, { name: 'specs', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs/adr') return { value: [{ name: 'ADR-001-x.md', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs/specs') return { value: [{ name: '..', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }, { name: 'ok-spec', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
+    if (p === '/repo/docs/specs/ok-spec') return { value: [{ name: 'spec.md', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] }
+
+    return { value: [] }
+  })
+  on('fs.exists', (_, e) => ({ value: e.path === '/repo/docs/specs/ok-spec/spec.md' }))
+  on('fs.read', () => ({ value: '# Ok spec\n\n> **Estado:** DRAFT\n' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const out = await $.command.run(RUN('objectives rescan'))
+  expect(out.text).toMatch(/spec:ok-spec/)
+  expect(out.text).not.toMatch(/ADR-001/)
+
+  const jira = await $.command.run(RUN('jira'))
+  expect(jira.text).toMatch(/not set/)
+})
+
+test('the JQL quotes the project key and a missing issue does not stop enrichment of the others', { options: { jiraProject: 'MH' } }, async ($, on) => {
+  world(on)
+  const jql: string[] = []
+  const issues: string[] = []
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag-j2' }))
+  on('mcp.call', (_, e) => {
+    const text = (v: unknown) => ({ value: { content: [{ type: 'text', text: JSON.stringify(v) }], isError: false } })
+    if (e.tool === 'getAccessibleAtlassianResources') return text([{ id: 'cloud-1', url: 'https://acme.atlassian.net' }])
+    if (e.tool === 'getJiraIssue') {
+      const key = String(e.args?.issueIdOrKey)
+      issues.push(key)
+      if (key === 'ISO-8601') return { value: { content: [{ type: 'text', text: 'Issue does not exist or you do not have permission to see it.' }], isError: true } }
+
+      return text({ key, fields: { summary: `S ${key}`, status: { name: 'Done', statusCategory: { key: 'done' } }, issuetype: { name: 'Story' }, assignee: null, customfield_10016: 1 } })
+    }
+    if (e.tool === 'searchJiraIssuesUsingJql') {
+      jql.push(String(e.args?.jql))
+
+      return text({ issues: [] })
+    }
+
+    return { value: { content: [{ type: 'text', text: 'unknown tool' }], isError: true } }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, description: 'dates in ISO-8601 for MH-5' })
+  await $.command.run(RUN('jira'))
+
+  expect(jql[0]).toMatch(/project = "MH" AND sprint in openSprints\(\)/)
+  expect(issues).toContain('ISO-8601')
+  expect(issues).toContain('MH-5')
 })

@@ -6,6 +6,31 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Security
+- `statusOf` parses the status from one bounded line with bounded whitespace classes: a crafted
+  ADR/spec with `**Status**` followed by a long whitespace run no longer backtracks cubically and
+  stalls the scan (security audit run-1, confirmed low).
+- Repo scan skips symlinked entries and names with separators or control characters, and caps the
+  catalog at 500 artifacts; rescans triggered by Write/Edit coalesce into one in-flight scan.
+- Text from agents, tools, Jira and repo headings is stripped of control, bidi-override and
+  zero-width characters before it reaches the pane, toasts or reports; markdown table cells escape
+  `|` and line breaks.
+- `jiraProject` must match a project key and is quoted in the JQL; cached Jira records are
+  shape-checked; a missing issue no longer stops the enrichment of the other keys.
+- `/wv report` re-validates ticket keys read from the store before any MCP call; `/wv jira` probes
+  connectivity with the resources tool instead of a fake issue lookup.
+- `turn.start`/`turn.complete` fail open like the other hooks; a failing `/wv` subcommand
+  returns a message instead of failing the command.
+- loop-mode workflow: `repoPath`/`worktreeRoot` must be absolute paths without shell
+  metacharacters; `tickets[].scope`, `designRef.value` and `fileOwnership` go through
+  `untrusted()` like AC/DoD; a setup agent reporting a different worktree path blocks the ticket
+  instead of redirecting later git lines; `maxFilesPerPhase` must be a positive integer.
+- loop-mode skill: PR-comment-driven changes require an AskUserQuestion in both decision modes and
+  comment bodies are wrapped as untrusted data; the run never merges in any mode.
+- Release workflow split into a read-only `verify` job (no persisted credentials, tag must be
+  reachable from `main`, pinned actions and CLI) and a `publish` job that runs no repository code;
+  an existing release is never overwritten.
+
 ## [0.4.0-beta.1] - 2026-11-13
 
 First public beta. Try it, open issues; the API, state shape and report layout may still move

@@ -4,8 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { RackAgent, RackCatalog, RackPhase, RackRun, RackState, RackTicket } from '../types'
 import { asLanguage, strings } from './i18n'
 import type { Language, Strings } from './i18n'
-import { HISTORY_PREFIX, aggregate, parseWindow, renderReport, savedLine, ticketsOf, toHistory } from './history'
-import { JiraUnavailable, fetchIssue, fetchSprint, sprintTotals } from './jira'
+import { HISTORY_PREFIX, aggregate, isTicketKey, parseWindow, renderReport, savedLine, ticketsOf, toHistory } from './history'
+import { JiraUnavailable, PROJECT_KEY, cloudId, fetchIssue, fetchSprint, sprintTotals } from './jira'
 import type { JiraConfig, JiraIssue, JiraSprint } from './jira'
 import { matchObjectives, scanObjectives, summarize, touchesArtifacts } from './objectives'
 import type { ObjectiveCatalog } from './objectives'
@@ -267,8 +267,8 @@ function enrich($: EnrichDollar, cfg: JiraConfig, keys: string[], now: number): 
         const issue = await fetchIssue($, cfg, key, now)
         if (issue) await update($, rack, s => ({ ...s, tickets: { ...s.tickets, [key]: toTicket(issue) } }))
       } catch (err) {
-        if (!(err instanceof JiraUnavailable)) throw err
-        // Jira is off or unauthenticated: the key stays bare in the rack.
+        // Jira is off, unauthenticated or answered with a shape we do not know: the key stays bare in the rack.
+        if (err instanceof JiraUnavailable) break
         break
       }
     }
@@ -278,7 +278,29 @@ function enrich($: EnrichDollar, cfg: JiraConfig, keys: string[], now: number): 
 type ScanDollar = Pick<EngineInterface, 'fs' | 'process' | 'session' | 'state' | 'clock'>
 
 /** Scans the repo's ADR/spec/OpenSpec/GSD/ticket artifacts and the current branch into the rack; cached for a while. */
+// One scan at a time: a burst of Write/Edit calls under artifact folders coalesces into the
+// scan in flight plus one trailing rescan, instead of one full scan per call.
+let scanInFlight: Promise<RackCatalog | undefined> | null = null
+let scanPending = false
+
 async function refreshCatalog($: ScanDollar, force = false): Promise<RackCatalog | undefined> {
+  if (scanInFlight) {
+    scanPending = scanPending || force
+
+    return scanInFlight
+  }
+  scanInFlight = scanOnce($, force).finally(() => {
+    scanInFlight = null
+    if (scanPending) {
+      scanPending = false
+      void refreshCatalog($, true).catch(() => undefined)
+    }
+  })
+
+  return scanInFlight
+}
+
+async function scanOnce($: ScanDollar, force: boolean): Promise<RackCatalog | undefined> {
   const now = await $.clock.now()
   const current = (await read($, rack)).objectives
   if (!force && current && now - current.scannedAt < CATALOG_TTL_MS) return current
@@ -357,7 +379,7 @@ export const register: Register = (on, options) => {
   const t = strings(language)
   const jira: JiraConfig = {
     server: typeof options.jiraServer === 'string' && options.jiraServer ? options.jiraServer : 'claude.ai Atlassian',
-    project: typeof options.jiraProject === 'string' ? options.jiraProject.trim().toUpperCase() : '',
+    project: typeof options.jiraProject === 'string' && PROJECT_KEY.test(options.jiraProject.trim().toUpperCase()) ? options.jiraProject.trim().toUpperCase() : '',
     pointsField: typeof options.jiraPointsField === 'string' && options.jiraPointsField ? options.jiraPointsField : 'customfield_10016',
   }
 
@@ -395,6 +417,7 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
+    try {
     const args = e.args.trim()
     const [sub, ...rest] = args.split(/\s+/)
     if (sub === 'loop') return { text: loopPrompt(rest.join(' '), language, autonomy) }
@@ -415,7 +438,7 @@ export const register: Register = (on, options) => {
       let error: string | null = null
       try {
         if (jira.project) sprint = await fetchSprint($, jira, now)
-        else await fetchIssue($, jira, 'WV-0', now).catch(err => { if (!(err instanceof JiraUnavailable) || /authenticate|not connected|not available|no accessible/i.test(err.message)) throw err })
+        else await cloudId($, jira)
       } catch (err) {
         if (!(err instanceof JiraUnavailable)) throw err
         error = err.message
@@ -434,6 +457,7 @@ export const register: Register = (on, options) => {
       let sprint: JiraSprint | null = null
       let sprintError: string | undefined
       for (const [key] of agg.byTicket) {
+        if (!isTicketKey(key)) continue
         const known = state.tickets[key]
         if (known) tickets[key] = { summary: known.summary, status: known.status }
         else {
@@ -473,6 +497,10 @@ export const register: Register = (on, options) => {
     await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
 
     return { text: t.paneOpened, isTextDisplayOnly: true }
+    } catch (err) {
+      // A malformed store record or an unexpected MCP shape degrades to a message, never a failed command.
+      return { text: `workflow-visualizer: ${err instanceof Error ? err.message : String(err)}`, isTextDisplayOnly: true }
+    }
   })
 
   on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
@@ -501,7 +529,7 @@ export const register: Register = (on, options) => {
       runKey,
       index: e.workflow?.agentIndex ?? 0,
       parentId: e.parentAgentId,
-      description: e.description || e.subagentType,
+      description: clip(e.description || e.subagentType, 200),
       task: clip(e.prompt, 600),
       type: e.subagentType,
       model: started.model,
@@ -573,7 +601,7 @@ export const register: Register = (on, options) => {
     )
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId ?? MAIN
@@ -696,7 +724,7 @@ export const register: Register = (on, options) => {
     )
     const done = state.agents.find(a => a.id === id)
     if (done) {
-      $.ui.toast(t.agentFinished(mascot(done.model), done.description, ok, fmtDur(now - done.startedAt), fmtTok(totalOf(done))))
+      $.ui.toast(t.agentFinished(mascot(done.model), clip(done.description, 80), ok, fmtDur(now - done.startedAt), fmtTok(totalOf(done))))
       const live = state.agents.filter(isLive)
       $.ui.status(live.length > 0 ? t.statusLine(live.length) : undefined)
       const runLeft = state.agents.some(a => a.runKey === done.runKey && isLive(a))
@@ -713,7 +741,7 @@ export const register: Register = (on, options) => {
     }
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const state = await read($, rack)

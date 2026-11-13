@@ -7,7 +7,8 @@ import { strings } from '../hooks/i18n'
 import { idFor, matchObjectives, normalizeStatus, statusOf, titleOf, touchesArtifacts } from '../hooks/objectives'
 import { priceOf, usdOf } from '../hooks/pricing'
 import { fit, spark, wrap } from '../hooks/rack-client'
-import { base, clip, workflowName } from '../hooks/text'
+import { base, clip, sanitize, workflowName } from '../hooks/text'
+import { cell, isTicketKey, table } from '../hooks/history'
 
 // Headers copied from real repos (ssd-project, flowstore) and from the conclave story template.
 const ADR_006 = `# ADR-006: Three-Wave Autonomous Delivery Loop on \`/conclave-dev\`, Without Auto-Merge
@@ -168,4 +169,38 @@ test('text helpers wrap, fit and clip without losing the ellipsis', () => {
   expect(spark([], 4, 0, false)).toBe('▁▁▁▁')
   expect(spark([1, 2, 4, 8], 4, 0, true)).toBe('▁▂▄█')
   expect(spark([5], 3, 0, true)).toBe('▁▁█')
+})
+
+test('statusOf and titleOf stay linear on pathological inputs (audit run-1)', () => {
+  const t0 = Date.now()
+  expect(statusOf('# ADR-009\n\n- **Status**' + ' '.repeat(65000) + '\n')).toBe('')
+  expect(statusOf('# x\n\n- **Estado**' + '\t'.repeat(65000) + 'draft\n')).toBe('')
+  expect(titleOf('#' + ' '.repeat(65000) + '\n', 'fallback')).toBe('fallback')
+  expect(titleOf('# ' + 'a'.repeat(65000) + '\n', 'x').length).toBe(298)
+  expect(Date.now() - t0 < 500).toBe(true)
+  expect(statusOf('- **Status**: accepted' + ' '.repeat(60000))).toBe('accepted')
+  expect(statusOf('> **Estado:** DRAFT')).toBe('draft')
+  expect(statusOf('status: in-progress   # comment')).toBe('in-progress')
+})
+
+test('sanitize drops terminal control, bidi and zero-width characters and clip applies it', () => {
+  const nasty = 'ok\u001b[2K\u001b]0;owned\u0007 \u009b31m \u202erev\u200b end'
+  expect(sanitize(nasty)).toBe('ok[2K]0;owned 31m rev end')
+  expect(clip(nasty, 60)).toBe('ok[2K]0;owned 31m rev end')
+  expect(clip('tabs\tand\nnewlines keep spacing', 60)).toBe('tabs and newlines keep spacing')
+})
+
+test('report table cells escape pipes and line breaks and drop control characters', () => {
+  expect(cell('Ambient view | DONE\n# injected')).toBe('Ambient view \\| DONE # injected')
+  expect(cell('\u001b[31mred')).toBe('[31mred')
+  const md = table(['a', 'b'], [['x|y', 'line1\nline2']])
+  expect(md.split('\n').length).toBe(3)
+  expect(md).toContain('| x\\|y | line1 line2 |')
+})
+
+test('isTicketKey accepts exactly one Jira-shaped key', () => {
+  expect(isTicketKey('MH-1234')).toBe(true)
+  expect(isTicketKey('mh-1')).toBe(false)
+  expect(isTicketKey('MH-1 OR 1=1')).toBe(false)
+  expect(isTicketKey('../../etc')).toBe(false)
 })

@@ -29,7 +29,7 @@ export type ObjectiveCatalog = {
 
 type FsDollar = {
   fs: {
-    list: (path?: string) => Promise<{ name: string; kind: 'file' | 'dir' | 'other' }[]>
+    list: (path?: string) => Promise<{ name: string; kind: 'file' | 'dir' | 'other'; isLink?: boolean }[]>
     read: (path: string) => Promise<string>
     exists: (path: string) => Promise<boolean>
   }
@@ -37,6 +37,10 @@ type FsDollar = {
 
 const MAX_FILES = 400
 const MAX_READ = 64 * 1024
+/** Longest line a title or status is parsed from; longer lines are cut before any regex runs. */
+const MAX_LINE = 300
+/** Most artifacts one catalog holds; the scan stops listing once reached. */
+export const MAX_ITEMS = 500
 
 /** Where each kind lives, as `[dir, fileRule]` with `*` one path segment. */
 const SOURCES: { kind: ObjectiveKind; pattern: string }[] = [
@@ -79,10 +83,15 @@ const ID_IN_NAME = /\b(ADR|SPEC|US|BUG|EP|SPRINT|RFC|TASK|T)-?(\d{1,5})\b/i
 const NUMBERED = /^(\d{2,5})[-_ ]/
 
 /** Title from the first markdown heading, else the file name. */
+/** The first line matching `test`, cut to MAX_LINE, so every regex below runs on a bounded line. */
+function firstLine(text: string, test: RegExp): string | undefined {
+  return text.split('\n').find(l => test.test(l))?.slice(0, MAX_LINE)
+}
+
 export function titleOf(text: string, fallback: string): string {
-  const h = text.match(/^#\s+(.+?)\s*$/m)
-  if (h?.[1]) return h[1].replace(/^(ADR|SPEC|US|BUG|EP)-?\d+\s*[:.\-–—]?\s*/i, '').trim()
-  const fm = text.match(/^title:\s*["']?(.+?)["']?\s*$/m)
+  const h = firstLine(text, /^#[ \t]+\S/)?.match(/^#[ \t]+(.*?)[ \t]*$/)
+  if (h?.[1]) return h[1].replace(/^(ADR|SPEC|US|BUG|EP)-?\d+[ \t]*[:.\-–—]?[ \t]*/i, '').trim()
+  const fm = firstLine(text, /^title:/)?.match(/^title:[ \t]*["']?(.*?)["']?[ \t]*$/)
   if (fm?.[1]) return fm[1].trim()
 
   return fallback
@@ -90,11 +99,14 @@ export function titleOf(text: string, fallback: string): string {
 
 /** Status from `**Status**: x`, `> **Estado:** x`, `Status: x` or frontmatter `status: x`. */
 export function statusOf(text: string): string {
-  const m =
-    text.match(/\*\*(?:status|estado)\s*:?\s*\*\*\s*:?\s*\**\s*([A-Za-z][A-Za-z _-]*)/i) ??
-    text.match(/^(?:status|estado)\s*:\s*["']?([A-Za-z][A-Za-z _-]*)/im)
+  // Each alternative runs on one bounded line with bounded whitespace classes: the cost is
+  // linear in MAX_LINE whatever the file holds (a 64 KiB whitespace run used to backtrack cubically).
+  const bold = firstLine(text, /\*\*(?:status|estado)/i)?.match(
+    /\*\*(?:status|estado)[ \t]{0,8}:?[ \t]{0,8}\*\*[ \t]{0,8}:?[ \t]{0,8}\*{0,2}[ \t]{0,8}([A-Za-z][A-Za-z _-]{0,60})/i,
+  )
+  const plain = bold ?? firstLine(text, /^(?:status|estado)[ \t]*:/i)?.match(/^(?:status|estado)[ \t]{0,8}:[ \t]{0,8}["']?([A-Za-z][A-Za-z _-]{0,60})/i)
 
-  return (m?.[1] ?? '').trim().toLowerCase()
+  return (plain?.[1] ?? '').trim().toLowerCase()
 }
 
 function slugWords(s: string): string[] {
@@ -107,7 +119,21 @@ function slugWords(s: string): string[] {
 
 const STOP = new Set(['spec', 'specs', 'proposal', 'readme', 'index', 'docs', 'adr', 'with', 'from', 'that', 'this', 'into', 'over', 'phase', 'story', 'stories', 'ticket', 'tickets', 'change', 'changes'])
 
-async function listGlob($: FsDollar, root: string, pattern: string, budget: { left: number }): Promise<string[]> {
+type Entry = { name: string; kind: 'file' | 'dir' | 'other'; isLink?: boolean }
+
+async function listGlob($: FsDollar, root: string, pattern: string, budget: { left: number }, cache: Map<string, Entry[]>): Promise<string[]> {
+  // Every segment, literal or wildcard, is resolved from a directory listing, so a symlinked
+  // directory or file is skipped wherever it sits in the path, not only under a `*`.
+  const listDir = async (rel: string): Promise<Entry[]> => {
+    const hit = cache.get(rel)
+    if (hit) return hit
+    if (budget.left <= 0) return []
+    budget.left--
+    const entries = (await $.fs.list(join(root, rel)).catch(() => [])).filter(e => e.isLink !== true && safeName(e.name))
+    cache.set(rel, entries)
+
+    return entries
+  }
   const parts = pattern.split('/')
   let paths = ['']
   for (let i = 0; i < parts.length; i++) {
@@ -115,24 +141,17 @@ async function listGlob($: FsDollar, root: string, pattern: string, budget: { le
     const last = i === parts.length - 1
     const next: string[] = []
     for (const base of paths) {
+      const entries = await listDir(base)
       if (part === '*') {
-        if (budget.left <= 0) break
-        budget.left--
-        const entries = await $.fs.list(join(root, base)).catch(() => [])
         for (const e of entries) {
           if (e.name.startsWith('.') && !last) continue
           if (last ? e.kind !== 'other' : e.kind === 'dir') next.push(joinRel(base, e.name))
         }
       } else if (part === '*.md') {
-        if (budget.left <= 0) break
-        budget.left--
-        const entries = await $.fs.list(join(root, base)).catch(() => [])
         for (const e of entries) if (e.kind === 'file' && e.name.endsWith('.md') && !/^(readme|index|template)\.md$/i.test(e.name)) next.push(joinRel(base, e.name))
       } else {
-        const rel = joinRel(base, part)
-        if (last) {
-          if (await $.fs.exists(join(root, rel)).catch(() => false)) next.push(rel)
-        } else next.push(rel)
+        const e = entries.find(x => x.name === part)
+        if (e && (last ? e.kind !== 'other' : e.kind === 'dir')) next.push(joinRel(base, part))
       }
     }
     paths = next
@@ -140,6 +159,11 @@ async function listGlob($: FsDollar, root: string, pattern: string, budget: { le
   }
 
   return paths
+}
+
+/** A directory entry name the scan will follow: no separators, no traversal, no control characters. */
+function safeName(name: string): boolean {
+  return name !== '.' && name !== '..' && !/[\/\\\u0000-\u001f]/.test(name)
 }
 
 function join(root: string, rel: string): string {
@@ -195,11 +219,14 @@ async function gsdPhase($: FsDollar, root: string, rel: string): Promise<RepoObj
 
 export async function scanObjectives($: FsDollar, root: string, branch: string | null, now: number): Promise<ObjectiveCatalog> {
   const budget = { left: MAX_FILES }
+  const cache = new Map<string, Entry[]>()
   const items: RepoObjective[] = []
   const seen = new Set<string>()
   for (const src of SOURCES) {
-    const rels = await listGlob($, root, src.pattern, budget)
+    if (items.length >= MAX_ITEMS) break
+    const rels = await listGlob($, root, src.pattern, budget, cache)
     for (const rel of rels) {
+      if (items.length >= MAX_ITEMS) break
       if (seen.has(rel)) continue
       seen.add(rel)
       if (src.kind === 'gsd-phase') {

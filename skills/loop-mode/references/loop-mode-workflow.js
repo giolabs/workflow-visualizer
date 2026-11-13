@@ -40,6 +40,13 @@ if (!ARGS.repoPath) {
 }
 const repoPath = ARGS.repoPath
 
+// Paths that reach shell lines must be absolute and free of shell metacharacters and
+// whitespace: the agents run the composed line as written.
+const PATH_RE = /^\/[^\s;&|`$<>(){}\\"'\n\r*?[\]!#~]+$/
+if (!PATH_RE.test(repoPath)) throw new Error(`args.repoPath "${repoPath}" must be an absolute path with no spaces or shell metacharacters`)
+if (ARGS.worktreeRoot !== undefined && !/^[^\s;&|`$<>(){}\\"'\n\r*?[\]!#~]+$/.test(ARGS.worktreeRoot)) throw new Error(`args.worktreeRoot "${ARGS.worktreeRoot}" holds spaces or shell metacharacters`)
+if (ARGS.verifyCommand !== undefined && (typeof ARGS.verifyCommand !== 'string' || ARGS.verifyCommand.length > 500)) throw new Error('args.verifyCommand must be a string of at most 500 characters')
+
 // Ticket keys, slugs and the branch prefix end up in git refs, paths and shell
 // lines the agents run. Refuse anything outside the strict shapes up front, so
 // text that came from Jira or a ticket body can never reach a shell.
@@ -54,6 +61,11 @@ for (const t of ARGS.tickets || []) {
 }
 if (ARGS.branchPrefix && !PREFIX_RE.test(ARGS.branchPrefix)) throw new Error(`branchPrefix "${ARGS.branchPrefix}" holds characters a branch name cannot`)
 if (ARGS.baseBranch && !PREFIX_RE.test(ARGS.baseBranch.replace(/\//g, '-'))) throw new Error(`baseBranch "${ARGS.baseBranch}" holds characters a branch name cannot`)
+
+/** One free-text field from the tracker, a design tool or another agent, as a single delimited string. */
+function untrustedText(label, text) {
+  return untrusted(label, [String(text ?? '')])
+}
 
 /** Jira or ticket-body text handed to an agent: delimited and labeled as data, never as instructions. */
 function untrusted(label, lines) {
@@ -74,7 +86,7 @@ function resolveWorktreeRootAbs() {
 
 const worktreeRoot = resolveWorktreeRootAbs()
 const branchPrefix = ARGS.branchPrefix || 'feat/'
-const maxFilesPerPhase = ARGS.maxFilesPerPhase || 5
+const maxFilesPerPhase = Number.isInteger(ARGS.maxFilesPerPhase) && ARGS.maxFilesPerPhase > 0 ? ARGS.maxFilesPerPhase : 5
 const verifyCommand = ARGS.verifyCommand || 'pnpm run build && pnpm run lint && pnpm run test'
 const models = ARGS.models || {}
 const defaultSpecModel = models.spec || 'opus'
@@ -122,7 +134,7 @@ Use the language this project's own spec corpus uses (sample a couple of existin
 function feRequirementNote(ticket) {
   if (!ticket.isFE) return ''
   const ref = ticket.designRef && ticket.designRef.type !== 'none'
-    ? `Design reference for this ticket (${ticket.designRef.type}): ${ticket.designRef.value}`
+    ? untrustedText(`Design reference for this ticket (${String(ticket.designRef.type).replace(/[^a-z-]/gi, '')})`, ticket.designRef.value)
     : 'No visual design reference was supplied for this ticket — if the ticket text alone leaves visual details ambiguous, flag it as blocked rather than inventing a look.'
   return `\n\nThis is a FE/UI ticket. Before writing anything: read this project's CLAUDE.md (and any nested one for the frontend app, e.g. apps/web/CLAUDE.md) and inspect DESIGN.md or whatever the project's actual design-system source is (tokens file, style guide, component library docs). Match its existing conventions exactly — do not invent a visual convention the project already defines elsewhere, and flag any disagreement between the ticket's own description and DESIGN.md instead of silently picking one. ${ref}`
 }
@@ -235,7 +247,7 @@ function ownershipNote(ticketKey) {
   }
   return (
     'Shared-file ownership map — do not modify a file owned by another ticket unless this ticket owns it:\n' +
-    ARGS.fileOwnership.map((o) => `- ${o.file} -> owned by ${o.owner}`).join('\n')
+    untrusted('Shared-file ownership entries (file -> owner)', ARGS.fileOwnership.map((o) => `${o.file} -> ${o.owner}`))
   )
 }
 
@@ -268,7 +280,14 @@ Report structured output: ok (true ONLY if the worktree exists, is clean, and is
     blocked.push({ ticket: ticket.key, stage: 'setup', detail: result })
     throw new Error(`setup blocked for ${ticket.key}`)
   }
-  return { worktreePath: result.worktreePath || worktreePath, branch: result.branch || branch }
+  // The script's computed path is authoritative. A subagent that reports another path is
+  // refusing the setup, not redirecting every later git line.
+  if (result.worktreePath && result.worktreePath !== worktreePath) {
+    log(`${ticket.key}: setup agent reported worktree ${result.worktreePath}, expected ${worktreePath} — blocking`)
+    blocked.push({ ticket: ticket.key, stage: 'setup', detail: { reason: 'worktreePath mismatch', reported: result.worktreePath, expected: worktreePath } })
+    throw new Error(`setup blocked for ${ticket.key}: worktree path mismatch`)
+  }
+  return { worktreePath, branch }
 }
 
 function specPromptBase(ticket, worktreePath) {
@@ -281,7 +300,7 @@ function specPromptBase(ticket, worktreePath) {
 
   return `You are writing an implementation spec for ticket ${ticket.key}, inside the git worktree at ${worktreePath}.
 
-Ticket scope: ${ticket.scope}
+${untrustedText('Ticket scope', ticket.scope)}
 
 ${acText}
 ${dodText}

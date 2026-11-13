@@ -53,6 +53,13 @@ type ToolRole = keyof typeof TOOLS
 
 const resolved = new Map<ToolRole, string>()
 
+/** The server says the tool name is wrong, as opposed to the issue being missing. */
+const TOOL_MISSING = /unknown tool|no such tool|tool ['"`]?[A-Za-z_]+['"`]? (?:is )?not (?:found|available|recognized)|invalid tool name/i
+/** The server says the issue does not exist: a bare key in the rack, not an outage. */
+const ISSUE_MISSING = /does not exist|issue not found|no issue|404|permission to see it/i
+/** Longest string kept from any issue field; MCP responses are not trusted for size. */
+const FIELD_MAX = 200
+
 export class JiraUnavailable extends Error {
   constructor(message: string) {
     super(message)
@@ -82,7 +89,7 @@ async function callRole($: McpDollar, cfg: JiraConfig, role: ToolRole, args: Rec
       if (result.isError) {
         lastError = String(payload(result) ?? 'tool error')
         // An unknown-tool error means try the next name; any other error is the answer.
-        if (/unknown tool|not found|no such tool/i.test(lastError)) continue
+        if (TOOL_MISSING.test(lastError)) continue
         throw new JiraUnavailable(`${tool}: ${lastError.slice(0, 200)}`)
       }
       resolved.set(role, tool)
@@ -91,7 +98,7 @@ async function callRole($: McpDollar, cfg: JiraConfig, role: ToolRole, args: Rec
     } catch (err) {
       if (err instanceof JiraUnavailable) throw err
       lastError = err instanceof Error ? err.message : String(err)
-      if (!/unknown tool|not found|no such tool|not connected|not available|authenticate/i.test(lastError)) {
+      if (!TOOL_MISSING.test(lastError) && !/not connected|not available|authenticate/i.test(lastError)) {
         throw new JiraUnavailable(`${tool}: ${lastError.slice(0, 200)}`)
       }
     }
@@ -100,7 +107,7 @@ async function callRole($: McpDollar, cfg: JiraConfig, role: ToolRole, args: Rec
 }
 
 function str(v: unknown): string | null {
-  return typeof v === 'string' && v.length > 0 ? v : null
+  return typeof v === 'string' && v.length > 0 ? v.slice(0, FIELD_MAX) : null
 }
 
 function num(v: unknown): number | null {
@@ -153,25 +160,50 @@ export function toIssue(raw: unknown, pointsField: string, siteUrl: string | nul
 
 const FIELDS = (pointsField: string) => ['summary', 'status', 'issuetype', 'assignee', 'sprint', 'customfield_10020', pointsField]
 
+/** Shape check for a cached issue record (older plugin versions may have written less). */
+function isIssue(v: unknown): v is JiraIssue {
+  const o = obj(v)
+
+  return !!o && typeof o.key === 'string' && typeof o.summary === 'string' && typeof o.status === 'string' && typeof o.fetchedAt === 'number'
+}
+
+function isSprint(v: unknown): v is JiraSprint {
+  const o = obj(v)
+
+  return !!o && typeof o.project === 'string' && Array.isArray(o.issues) && o.issues.every(isIssue) && typeof o.fetchedAt === 'number'
+}
+
 export async function fetchIssue($: McpDollar, cfg: JiraConfig, key: string, now: number): Promise<JiraIssue | null> {
-  const cached = obj(await $.store.get(issueKey(key)))
-  if (cached && typeof cached.fetchedAt === 'number' && now - cached.fetchedAt < ISSUE_TTL_MS) return cached as unknown as JiraIssue
+  if (!/^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(key)) return null
+  const cached = await $.store.get(issueKey(key))
+  if (isIssue(cached) && now - cached.fetchedAt < ISSUE_TTL_MS) return cached
   const site = await cloudId($, cfg)
-  const data = await callRole($, cfg, 'issue', { cloudId: site.id, issueIdOrKey: key, fields: FIELDS(cfg.pointsField) })
+  let data: unknown
+  try {
+    data = await callRole($, cfg, 'issue', { cloudId: site.id, issueIdOrKey: key, fields: FIELDS(cfg.pointsField) })
+  } catch (err) {
+    // A missing issue (a false-positive key such as ISO-8601) is not an outage: keep looking up the others.
+    if (err instanceof JiraUnavailable && ISSUE_MISSING.test(err.message)) return null
+    throw err
+  }
   const issue = toIssue(data, cfg.pointsField, site.url, now)
   if (issue) await $.store.set(issueKey(key), issue)
 
   return issue
 }
 
+/** A Jira project key as the plugin accepts it in userConfig; anything else disables sprint metrics. */
+export const PROJECT_KEY = /^[A-Z][A-Z0-9_]{1,9}$/
+
 export async function fetchSprint($: McpDollar, cfg: JiraConfig, now: number): Promise<JiraSprint> {
   if (!cfg.project) throw new JiraUnavailable('no jiraProject configured')
-  const cached = obj(await $.store.get(sprintKey(cfg.project)))
-  if (cached && typeof cached.fetchedAt === 'number' && now - cached.fetchedAt < SPRINT_TTL_MS) return cached as unknown as JiraSprint
+  if (!PROJECT_KEY.test(cfg.project)) throw new JiraUnavailable(`jiraProject "${cfg.project}" is not a project key`)
+  const cached = await $.store.get(sprintKey(cfg.project))
+  if (isSprint(cached) && now - cached.fetchedAt < SPRINT_TTL_MS) return cached
   const site = await cloudId($, cfg)
   const data = await callRole($, cfg, 'search', {
     cloudId: site.id,
-    jql: `project = ${cfg.project} AND sprint in openSprints() ORDER BY status ASC, created ASC`,
+    jql: `project = "${cfg.project}" AND sprint in openSprints() ORDER BY status ASC, created ASC`,
     fields: FIELDS(cfg.pointsField),
     maxResults: 100,
   })

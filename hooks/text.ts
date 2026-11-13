@@ -13,8 +13,19 @@ export function base(path: string): string {
   return tail || path
 }
 
+/** Characters a terminal or a markdown sink must never receive from untrusted text:
+ * C0 and C1 controls (ESC, BEL, BS, DEL, CSI…), bidi overrides and isolates, and the
+ * zero-width/line-separator family. Tabs, newlines and carriage returns are whitespace
+ * and are handled by the callers' whitespace collapsing. */
+const UNSAFE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g
+
+/** Drops control, bidi-override and zero-width characters; keeps every printable one. */
+export function sanitize(text: string): string {
+  return text.replace(UNSAFE, '')
+}
+
 export function clip(text: string, max: number): string {
-  const one = text.replace(/\s+/g, ' ').trim()
+  const one = sanitize(text).replace(/\s+/g, ' ').trim()
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
 }
 
