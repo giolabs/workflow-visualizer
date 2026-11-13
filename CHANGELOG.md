@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.3] - 2026-11-13
+
 ### Added
 - `/wv <request in plain words>` launches the plugin's own `wv-ask` Workflow: three research
   agents in parallel (repository artifacts, Jira through the Atlassian MCP, git history) and a
