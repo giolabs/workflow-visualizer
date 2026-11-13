@@ -224,15 +224,10 @@ function resolveSubcommand(first: string, hasMore: boolean): { sub: Subcommand; 
   return { sub: hasMore ? 'ask' : 'unknown', corrected: false }
 }
 
-const ASK_SCRIPT_DIR = '.workflow-visualizer'
-const ASK_SCRIPT_FILE = 'wv-ask.js'
-
 /** The exact Workflow call the orchestrator makes for a /wv request, and what to do with its result. */
-function launchPrompt(request: string, language: Language, askArgs: AskArgs, scriptPath: string | null): string {
+function launchPrompt(request: string, language: Language, askArgs: AskArgs): string {
   const lang = language === 'es' ? 'Spanish (rioplatense)' : 'English'
-  const scriptLines = scriptPath
-    ? [`Workflow input \`scriptPath\`: ${scriptPath} (the plugin just wrote the \`${ASK_WORKFLOW_NAME}\` script there; do not edit it)`]
-    : ['Workflow input `script` (verbatim):', '```js', askWorkflowScript().trim(), '```']
+  const scriptLines = ['Workflow input `script` (verbatim):', '```js', askWorkflowScript().trim(), '```']
 
   return [
     `The user typed \`/wv ${request}\` to the workflow-visualizer plugin. That slash command is their explicit opt-in to multi-agent orchestration: call the Workflow tool NOW, before anything else, with exactly these inputs:`,
@@ -524,15 +519,9 @@ export const register: Register = (on, options) => {
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
       // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
       await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
-      // The script goes to a file so the prompt that starts the turn stays short (`scriptPath`).
-      const scriptPath = `${askArgs.repoRoot}/${ASK_SCRIPT_DIR}/${ASK_SCRIPT_FILE}`
-      let prompt: string
-      try {
-        await $.fs.write(scriptPath, askWorkflowScript())
-        prompt = launchPrompt(args, language, askArgs, scriptPath)
-      } catch {
-        prompt = launchPrompt(args, language, askArgs, null)
-      }
+      // The script travels verbatim in the prompt: a file under the repo could be swapped or
+      // symlinked between the write and the Workflow run, and the engine would execute it.
+      const prompt = launchPrompt(args, language, askArgs)
       if (!launchTurn) return { text: t.askLaunched(clip(args, 80)), context: [prompt] }
       launchTurn(prompt, t.launchRefused)
 
