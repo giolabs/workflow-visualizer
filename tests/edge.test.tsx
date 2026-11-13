@@ -137,12 +137,29 @@ test('with no git and no artifacts, objectives says so instead of failing', asyn
   expect(out.text).toMatch(/No objective artifacts in \/repo/)
 })
 
-test('/wv with an unknown subcommand opens the pane and says so', async ($, on) => {
+test('/wv forgives typos, points config to /config and hands plain-word requests to the model', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
-  const out = await $.command.run(RUN('whatever'))
-  expect(out.text).toBe('Workflow Visualizer opened.')
+  const typo = await $.command.run(RUN('objetives'))
+  expect(typo.text).toMatch(/No objective artifacts/)
+  expect(typo.text).toMatch(/read as "objectives"/)
+  expect(typo.isTextDisplayOnly).toBe(true)
+
+  const cfg = await $.command.run(RUN('cofig'))
+  expect(cfg.text).toMatch(/\/config → workflow-visualizer/)
+
+  const ask = await $.command.run(RUN('Ver los tickets del ADR-050 que esten en backlog'))
+  expect(ask.text).toMatch(/Handing your request/)
+  expect(ask.isTextDisplayOnly).toBeUndefined()
+  expect(ask.context?.[0]).toMatch(/ADR-050/)
+  expect(ask.context?.[0]).toMatch(/\/wv objectives/)
+
+  const unknown = await $.command.run(RUN('whatever'))
+  expect(unknown.text).toMatch(/Unknown subcommand "whatever"/)
+
+  const open = await $.command.run(RUN(''))
+  expect(open.text).toBe('Workflow Visualizer opened.')
 })
 
 test('a symlinked artifact directory is not followed and a bad jiraProject disables sprint metrics', { options: { jiraProject: 'MH OR 1=1' } }, async ($, on) => {

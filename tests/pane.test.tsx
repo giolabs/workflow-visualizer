@@ -81,9 +81,11 @@ test('/wv loop hands the model the bundled skill with the plugin settings', { op
     origin: { kind: 'composer' },
     presentation: { isFullscreen: false, columns: 120 },
   })
-  expect(ran.text).toMatch(/loop-mode/)
-  expect(ran.text).toMatch(/MH-1 MH-2/)
-  expect(ran.text).toMatch(/autonomous/)
+  expect(ran.text).toMatch(/Starting loop-mode for: MH-1 MH-2/)
+  expect(ran.isTextDisplayOnly).toBeUndefined()
+  expect(ran.context?.[0]).toMatch(/loop-mode/)
+  expect(ran.context?.[0]).toMatch(/MH-1 MH-2/)
+  expect(ran.context?.[0]).toMatch(/autonomous/)
 })
 
 test('/wv report aggregates stored sessions and the live one', async ($, on) => {

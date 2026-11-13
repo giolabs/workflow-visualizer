@@ -190,6 +190,48 @@ function loopPrompt(args: string, language: Language, autonomy: string): string 
   ].join('\n')
 }
 
+const SUBCOMMANDS = ['loop', 'report', 'objectives', 'jira', 'help', 'config'] as const
+type Subcommand = (typeof SUBCOMMANDS)[number] | 'open' | 'ask' | 'unknown'
+
+/** Edit distance, for forgiving a typo in a subcommand (`objetives`, `cofig`). */
+function distance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0] ?? 0
+    prev[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j] ?? 0
+      prev[j] = Math.min((prev[j] ?? 0) + 1, (prev[j - 1] ?? 0) + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1))
+      diag = tmp
+    }
+  }
+
+  return prev[b.length] ?? 0
+}
+
+/** What the first word after /wv means: a subcommand, a near miss of one, free text for the model, or nothing. */
+function resolveSubcommand(first: string, hasMore: boolean): { sub: Subcommand; corrected: boolean } {
+  const word = first.toLowerCase()
+  if (word === '') return { sub: 'open', corrected: false }
+  if ((SUBCOMMANDS as readonly string[]).includes(word)) return { sub: word as Subcommand, corrected: false }
+  if (['settings', 'configuracion', 'configuración', 'ajustes', 'ayuda'].includes(word)) return { sub: word === 'ayuda' ? 'help' : 'config', corrected: true }
+  const near = SUBCOMMANDS.find(s => distance(word, s) <= Math.max(1, Math.floor(s.length / 3)))
+  if (near) return { sub: near, corrected: true }
+  // One lone word that is no subcommand is a typo to report; several words are a request in plain words.
+  return { sub: hasMore ? 'ask' : 'unknown', corrected: false }
+}
+
+/** A free-text request after /wv, handed to the model with the visualizer's context. */
+function askPrompt(request: string, language: Language): string {
+  const lang = language === 'es' ? 'Spanish (rioplatense)' : 'English'
+
+  return [
+    `The user typed this request to the Workflow Visualizer plugin: "${request}"`,
+    'Answer it using the plugin\'s own data and commands first: run /wv objectives for the repository\'s ADRs, specs, OpenSpec changes, GSD phases and local tickets (ids, status, agent cost); /wv report for productivity by model/workflow/ticket; /wv jira for the open sprint; the rack pane for live agents. For Jira issues linked to an ADR, epic or key, use the Atlassian MCP tools (searchJiraIssuesUsingJql, getJiraIssue) when they are available, else say Jira is not connected (/mcp → claude.ai Atlassian).',
+    `Reply in ${lang}. Every decision that is the user's goes through AskUserQuestion with 2-4 options, the recommended one first and marked "(Recommended)", each with a one-line reason; never ask in prose. Do not start a loop-mode run from this request; that is /wv loop <tickets>.`,
+  ].join('\n')
+}
+
 function helpText(t: Strings, language: Language, autonomy: string): string {
   const lines =
     language === 'es'
@@ -201,7 +243,8 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
           '/wv jira       estado de la conexión con Jira y el sprint abierto del proyecto configurado',
           '/wv objectives [rescan]   ADR, specs, OpenSpec, GSD y tickets locales del repo, con estado y costo de agentes',
           '/wv help       esta ayuda',
-          `Config: idioma=${language}, modo=${autonomy}. Cambialos en /config → workflow-visualizer.`,
+          '/wv <pedido en palabras>   se lo pasa al orquestador con el contexto del visualizer (p. ej. "/wv tickets del ADR-050 en backlog")',
+          `Config: idioma=${language}, modo=${autonomy}. Cambialos en /config → workflow-visualizer (también /wv config).`,
         ]
       : [
           `${t.paneTitle} — subcommands:`,
@@ -211,7 +254,8 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
           '/wv jira       Jira connection status and the open sprint of the configured project',
           '/wv objectives [rescan]   the repo\'s ADRs, specs, OpenSpec changes, GSD phases and local tickets, with status and agent cost',
           '/wv help       this help',
-          `Config: language=${language}, mode=${autonomy}. Change them in /config → workflow-visualizer.`,
+          '/wv <request in plain words>   hands it to the orchestrator with the visualizer context (e.g. "/wv tickets of ADR-050 in backlog")',
+          `Config: language=${language}, mode=${autonomy}. Change them in /config → workflow-visualizer (also /wv config).`,
         ]
 
   return lines.join('\n')
@@ -419,9 +463,16 @@ export const register: Register = (on, options) => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     try {
     const args = e.args.trim()
-    const [sub, ...rest] = args.split(/\s+/)
-    if (sub === 'loop') return { text: loopPrompt(rest.join(' '), language, autonomy) }
+    const [first = '', ...restRaw] = args.split(/\s+/)
+    const resolved = resolveSubcommand(first, restRaw.length > 0)
+    const sub = resolved.sub
+    const rest = restRaw
+    const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
+    if (sub === 'loop') return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [loopPrompt(rest.join(' '), language, autonomy)] }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
+    if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
+    if (sub === 'ask') return { text: t.askStarting, context: [askPrompt(args, language)] }
+    if (sub === 'unknown') return { text: t.unknownSubcommand(first), isTextDisplayOnly: true }
     if (sub === 'objectives') {
       const catalog = await refreshCatalog($, rest.includes('rescan'))
       const state = await read($, rack)
@@ -430,7 +481,7 @@ export const register: Register = (on, options) => {
       const agg = aggregate(sessions, 'all', now)
       const cost = new Map(agg.byObjective.map(([id, b]) => [id, b.usd]))
 
-      return { text: objectivesText(language, catalog, cost), isTextDisplayOnly: true }
+      return { text: `${objectivesText(language, catalog, cost)}${note}`, isTextDisplayOnly: true }
     }
     if (sub === 'jira') {
       const now = await $.clock.now()
