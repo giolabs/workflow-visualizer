@@ -7,6 +7,12 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 ## [Unreleased]
 
 ### Fixed
+- `/wv loop …` and `/wv <request>` start the orchestrator's turn themselves: a command's hidden
+  context is recorded but starts no turn, so beta.3 showed the notice and nothing ran. The prompt is
+  submitted (`$.prompt.submit`) from a timer right after the command answers, since the engine refuses
+  a submit from inside `command.run` (that hook holds the turn); a refused submission shows a toast.
+  The `wv-ask` script is written to `<repo>/.workflow-visualizer/wv-ask.js` and launched by
+  `scriptPath`, keeping the visible prompt short.
 - `/wv loop …` and `/wv <request>` open the rack pane with focus at once, instead of waiting for the
   Workflow call to open it unfocused (which, outside fullscreen or under 110 columns, left it unseated).
 
