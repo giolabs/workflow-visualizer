@@ -127,7 +127,7 @@ plugin ya fijados; cada decisión te llega como pregunta de opción múltiple co
 
 ```
 claude plugin validate .      # manifest, hooks y marketplace tal como los lee el engine
-claude plugin test .          # 28 tests: hooks, UI, parsers, reportes golden, casos borde
+claude plugin test .          # 34 tests: hooks, UI, parsers, reportes golden, casos borde
 tests/e2e/objectives.sh       # chequeo headless contra repos reales (gasta tokens)
 ```
 

@@ -4,6 +4,7 @@ import type { JiraSprint } from './jira'
 import { sprintTotals } from './jira'
 import type { ObjectiveCatalog } from './objectives'
 import { summarize } from './objectives'
+import { sanitize } from './text'
 
 /** What one session leaves in `$.store` under `history:<sessionId>`. */
 export type HistoryAgent = {
@@ -51,6 +52,11 @@ const SESSION_AGENTS_MAX = 400
 const TICKET = /\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/g
 
 /** Jira/Linear-looking keys in a text (`MH-1234`, `ENG-42`), unique, in order. */
+/** True when `key` is exactly one Jira/Linear-looking key, the shape ticketsOf extracts. */
+export function isTicketKey(key: string): boolean {
+  return /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(key)
+}
+
 export function ticketsOf(...texts: string[]): string[] {
   const out: string[] = []
   for (const text of texts) {
@@ -321,8 +327,13 @@ const REPORT = {
   },
 } as const
 
-function table(header: string[], rows: string[][]): string {
-  const line = (cells: string[]) => `| ${cells.join(' | ')} |`
+/** One markdown table cell: control characters dropped, pipes escaped, line breaks collapsed. */
+export function cell(text: string): string {
+  return sanitize(String(text)).replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim()
+}
+
+export function table(header: string[], rows: string[][]): string {
+  const line = (cells: string[]) => `| ${cells.map(cell).join(' | ')} |`
 
   return [line(header), line(header.map(() => '---')), ...rows.map(line)].join('\n')
 }
@@ -440,7 +451,7 @@ function pushObjectives(out: string[], agg: Aggregate, r: ReportStrings, catalog
 
     return
   }
-  if (catalog.branch) out.push(`_${r.branch}: \`${catalog.branch}\`_`, '')
+  if (catalog.branch) out.push(`_${r.branch}: \`${sanitize(catalog.branch).replace(/`/g, '')}\`_`, '')
   const byId = new Map(catalog.items.map(o => [o.id, o]))
   const cost = new Map(agg.byObjective)
   const touched = catalog.items.filter(o => cost.has(o.id))

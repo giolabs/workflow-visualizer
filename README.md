@@ -128,7 +128,7 @@ choice question with a recommended option.
 
 ```
 claude plugin validate .      # manifest, hooks and marketplace as the engine reads them
-claude plugin test .          # 28 tests: hooks, UI, parsers, golden reports, edge cases
+claude plugin test .          # 34 tests: hooks, UI, parsers, golden reports, edge cases
 tests/e2e/objectives.sh       # headless check against real repos (spends tokens)
 ```
 

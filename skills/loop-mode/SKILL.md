@@ -60,7 +60,9 @@ back to skipping one of these four.
    assign rather than assigning it yourself.
 4. **Push/PR policy** — follows the decision mode from Step 0: under `hitl` nothing gets pushed or
    opened as a PR until the user gives explicit go-ahead, ticket by ticket or as a batch; under
-   `autonomous` the run pushes and opens PRs itself and reports every decision it took.
+   `autonomous` the run pushes and opens PRs itself and reports every decision it took. In either
+   mode the run never merges, and a change driven by a PR comment (Step 10) always goes through an
+   AskUserQuestion before it is applied, pushed or replied to.
 
 Things you *can* infer without asking (state your inference so the user can correct it): base
 branch (usually `develop` or `main`), the verification command (check root `package.json` /
@@ -181,7 +183,9 @@ behind per goal — ticket-intelligence findings, orchestrator decisions, subage
 
 ## Step 9 — Push / PR (only when the user lifts the pause)
 
-Never automatic, regardless of how clean a layer looks. When the user explicitly says to proceed:
+Under `hitl` (Step 0) never automatic, regardless of how clean a layer looks: wait for the user's
+explicit go-ahead. Under `autonomous` the push and the PR happen without the pause, each decision
+reported, and merging is never done by the run in any mode. When pushing:
 
 1. Push each ticket's branch, in dependency/merge order (layer 0 first).
 2. Build the PR the way this repo already expects: if the `generate-pr` skill is available, invoke
