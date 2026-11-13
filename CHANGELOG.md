@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.4] - 2026-11-13
+
 ### Fixed
 - `/wv loop …` and `/wv <request>` start the orchestrator's turn themselves: a command's hidden
   context is recorded but starts no turn, so beta.3 showed the notice and nothing ran. The prompt is
