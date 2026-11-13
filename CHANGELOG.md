@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.7] - 2026-11-13
+
 ### Added
 - The orchestrator's own reasoning (`hooks/brain.ts`), first two decisions:
   - **Model per task.** When a subagent is spawned without a model (no `model` on the Agent call
