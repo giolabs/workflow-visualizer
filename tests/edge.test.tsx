@@ -23,15 +23,35 @@ const SPAWN = {
 const RUN = (args: string) => ({ command: 'wv', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } }) as const
 
 /** The engine beneath the plugin: clock, session, store, an empty repo, no git. */
-function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: false }> = {}) {
+function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: false; opened: unknown[]; submitted: string[]; written: Record<string, string>; dropPrompts: true; toasts: string[] }> = {}) {
   on('command.register', () => ({ value: { command: 'wv' } }))
-  mock.clock(on, { now: 1_700_000_000_000 })
+  const clock = mock.clock(on, { now: 1_700_000_000_000 })
   on('session.model', () => ({ value: 'claude-fable-5-1' }))
   on('session.id', () => ({ value: 'sess-live' }))
   on('session.cwd', () => ({ value: '/repo' }))
   on('session.repo', () => ({ value: null }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1_000_000, percent: 12 }, rateLimits: [], cost: { usd: 1.5 } } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_, e) => {
+    extra.opened?.push(e)
+
+    return { value: { isPlaced: true } }
+  })
+  on('ui.toast', (_, e) => {
+    extra.toasts?.push(e.text)
+
+    return { value: undefined }
+  })
+  on('prompt.submit', (_, e) => {
+    if (extra.dropPrompts) return { drop: 'not now' }
+    extra.submitted?.push(e.text)
+
+    return { text: e.text, origin: e.origin }
+  })
+  on('fs.write', (_, e) => {
+    if (extra.written) extra.written[e.path] = e.text
+
+    return { value: undefined }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.call', () => ({ result: {} }))
   if (extra.fs !== false) {
@@ -41,6 +61,8 @@ function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: fals
   }
   on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }))
   mock.store(on, extra.store)
+
+  return clock
 }
 
 test('a denied spawn leaves no tile', async ($, on) => {
@@ -151,9 +173,8 @@ test('/wv forgives typos, points config to /config and hands plain-word requests
 
   const ask = await $.command.run(RUN('Ver los tickets del ADR-050 que esten en backlog'))
   expect(ask.text).toMatch(/Launching the wv-ask workflow for: Ver los tickets del ADR-050/)
-  expect(ask.isTextDisplayOnly).toBeUndefined()
-  expect(ask.context?.[0]).toMatch(/call the Workflow tool NOW/)
-  expect(ask.context?.[0]).toMatch(/name: 'wv-ask'/)
+  expect(ask.isTextDisplayOnly).toBe(true)
+  expect(ask.context).toBeUndefined()
 
   const unknown = await $.command.run(RUN('whatever'))
   expect(unknown.text).toMatch(/Unknown subcommand "whatever"/)
@@ -218,21 +239,54 @@ test('the JQL quotes the project key and a missing issue does not stop enrichmen
   expect(issues).toContain('MH-5')
 })
 
-test('/wv <request> hands the orchestrator the exact Workflow call: verbatim script, request only in args', async ($, on) => {
-  world(on)
+test('/wv <request> writes the wv-ask script, submits the launch prompt as the plugin, and opens the pane focused', async ($, on) => {
+  const opened: unknown[] = []
+  const submitted: string[] = []
+  const written: Record<string, string> = {}
+  const clock = world(on, { opened, submitted, written })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
   const out = await $.command.run(RUN('Revisar los tickets de ADR-050'))
-  const ctx = out.context?.[0] ?? ''
-  const script = ctx.slice(ctx.indexOf('```js') + 5, ctx.indexOf('```', ctx.indexOf('```js') + 5))
-  expect(script).toMatch(/export const meta = \{\s*name: 'wv-ask'/)
-  expect(script).not.toMatch(/ADR-050/)
-  const argsLine = ctx.split('\n').find(l => l.startsWith('Workflow input `args`')) ?? ''
+  expect(out.isTextDisplayOnly).toBe(true)
+  expect(out.context).toBeUndefined()
+  expect(submitted.length).toBe(0)
+  await clock.advance(1)
+  expect(written['/repo/.workflow-visualizer/wv-ask.js']).toMatch(/name: 'wv-ask'/)
+  expect(written['/repo/.workflow-visualizer/wv-ask.js']).not.toMatch(/ADR-050/)
+  expect(submitted.length).toBe(1)
+  const prompt = submitted[0] ?? ''
+  expect(prompt).toMatch(/call the Workflow tool NOW/)
+  expect(prompt).toMatch(/scriptPath`: \/repo\/\.workflow-visualizer\/wv-ask\.js/)
+  const argsLine = prompt.split('\n').find(l => l.startsWith('Workflow input `args`')) ?? ''
   const parsed = JSON.parse(argsLine.slice(argsLine.indexOf('{')))
   expect(parsed.request).toBe('Revisar los tickets de ADR-050')
   expect(parsed.repoRoot).toBe('/repo')
-  expect(parsed.language).toBe('en')
-  expect(ctx).toMatch(/AskUserQuestion/)
+  expect(prompt).toMatch(/AskUserQuestion/)
+  expect(opened.some(o => (o as { focus?: true }).focus === true)).toBe(true)
+})
+
+test('/wv <request> toasts when the engine drops the deferred prompt', async ($, on) => {
+  const toasts: string[] = []
+  const clock = world(on, { dropPrompts: true, toasts })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const out = await $.command.run(RUN('Revisar los tickets de ADR-050'))
+  expect(out.isTextDisplayOnly).toBe(true)
+  await clock.advance(1)
+  expect(toasts[0]).toMatch(/could not start the turn: not now/)
+})
+
+test('/wv loop submits the loop-mode prompt as the plugin', async ($, on) => {
+  const submitted: string[] = []
+  const clock = world(on, { submitted })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+  const out = await $.command.run(RUN('loop BO-548'))
+  expect(out.text).toMatch(/Starting loop-mode for: BO-548/)
+  expect(out.isTextDisplayOnly).toBe(true)
+  await clock.advance(1)
+  expect(submitted[0]).toMatch(/loop-mode/)
+  expect(submitted[0]).toMatch(/BO-548/)
 })
 
 test('/wv help shows the plugin version', async ($, on) => {

@@ -28,8 +28,14 @@ const SPAWN = {
 } as const
 
 function world(on: On) {
+  const submitted: string[] = []
+  on('prompt.submit', (_, e) => {
+    submitted.push(e.text)
+
+    return { text: e.text, origin: e.origin }
+  })
   on('command.register', () => ({ value: { command: 'wv' } }))
-  mock.clock(on, { now: 1_700_000_000_000 })
+  const clock = mock.clock(on, { now: 1_700_000_000_000 })
   on('session.model', () => ({ value: 'claude-fable-5-1' }))
   on('session.usage', () => ({
     value: { startedAt: 0, context: { window: 1_000_000, percent: 12 }, rateLimits: [], cost: { usd: 1.5 } },
@@ -38,6 +44,8 @@ function world(on: On) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag-1' }))
   on('tool.call', () => ({ result: {} }))
+
+  return { clock, submitted }
 }
 
 test('the pane draws the orchestrator in English by default, with an empty rack', async ($, on) => {
@@ -72,7 +80,7 @@ test('a spawned agent shows as a tile and is counted', async ($, on) => {
 })
 
 test('/wv loop hands the model the bundled skill with the plugin settings', { options: { autonomy: 'autonomous' } }, async ($, on) => {
-  world(on)
+  const { clock, submitted } = world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const ran = await $.command.run({
@@ -82,10 +90,13 @@ test('/wv loop hands the model the bundled skill with the plugin settings', { op
     presentation: { isFullscreen: false, columns: 120 },
   })
   expect(ran.text).toMatch(/Starting loop-mode for: MH-1 MH-2/)
-  expect(ran.isTextDisplayOnly).toBeUndefined()
-  expect(ran.context?.[0]).toMatch(/loop-mode/)
-  expect(ran.context?.[0]).toMatch(/MH-1 MH-2/)
-  expect(ran.context?.[0]).toMatch(/autonomous/)
+  expect(ran.isTextDisplayOnly).toBe(true)
+  // The prompt is submitted after the command answered (a timer under the session's $), not from command.run.
+  expect(submitted.length).toBe(0)
+  await clock.advance(1)
+  expect(submitted[0]).toMatch(/loop-mode/)
+  expect(submitted[0]).toMatch(/MH-1 MH-2/)
+  expect(submitted[0]).toMatch(/autonomous/)
 })
 
 test('/wv report aggregates stored sessions and the live one', async ($, on) => {

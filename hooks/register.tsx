@@ -224,17 +224,20 @@ function resolveSubcommand(first: string, hasMore: boolean): { sub: Subcommand; 
   return { sub: hasMore ? 'ask' : 'unknown', corrected: false }
 }
 
+const ASK_SCRIPT_DIR = '.workflow-visualizer'
+const ASK_SCRIPT_FILE = 'wv-ask.js'
+
 /** The exact Workflow call the orchestrator makes for a /wv request, and what to do with its result. */
-function launchPrompt(request: string, language: Language, askArgs: AskArgs): string {
+function launchPrompt(request: string, language: Language, askArgs: AskArgs, scriptPath: string | null): string {
   const lang = language === 'es' ? 'Spanish (rioplatense)' : 'English'
+  const scriptLines = scriptPath
+    ? [`Workflow input \`scriptPath\`: ${scriptPath} (the plugin just wrote the \`${ASK_WORKFLOW_NAME}\` script there; do not edit it)`]
+    : ['Workflow input `script` (verbatim):', '```js', askWorkflowScript().trim(), '```']
 
   return [
-    `The user typed \`/wv ${request}\` to the workflow-visualizer plugin. That slash command is their explicit opt-in to multi-agent orchestration: call the Workflow tool NOW, before anything else, with exactly these inputs and no changes to the script text:`,
+    `The user typed \`/wv ${request}\` to the workflow-visualizer plugin. That slash command is their explicit opt-in to multi-agent orchestration: call the Workflow tool NOW, before anything else, with exactly these inputs:`,
     '',
-    'Workflow input `script` (verbatim):',
-    '```js',
-    askWorkflowScript().trim(),
-    '```',
+    ...scriptLines,
     '',
     `Workflow input \`args\` (JSON, pass as an object): ${JSON.stringify(askArgs)}`,
     '',
@@ -346,6 +349,13 @@ type ScanDollar = Pick<EngineInterface, 'fs' | 'process' | 'session' | 'state' |
 // One scan at a time: a burst of Write/Edit calls under artifact folders coalesces into the
 // scan in flight plus one trailing rescan, instead of one full scan per call.
 let scanInFlight: Promise<RackCatalog | undefined> | null = null
+/**
+ * Starts a model turn with the plugin's prompt, set by session.start. The engine refuses
+ * `$.prompt.submit` from inside `command.run` (that hook holds the turn the submit would
+ * wait on), so the submit runs in a timer callback under the session's `$`, after the
+ * command answered. Fire and forget: a refusal is reported as a toast.
+ */
+let launchTurn: ((text: string, onRefused: string) => void) | null = null
 let scanPending = false
 
 async function refreshCatalog($: ScanDollar, force = false): Promise<RackCatalog | undefined> {
@@ -449,6 +459,13 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
+    launchTurn = (text, onRefused) => {
+      $.clock.after(0, () => {
+        void $.prompt.submit({ text })
+          .then(entered => ('drop' in entered ? $.ui.toast(`${onRefused} ${String(entered.drop)}`) : undefined))
+          .catch((err: unknown) => $.ui.toast(`${onRefused} ${err instanceof Error ? err.message : String(err)}`))
+      })
+    }
     await $.command.register({
       name: COMMAND,
       description: t.commandOpen,
@@ -489,7 +506,14 @@ export const register: Register = (on, options) => {
     const sub = resolved.sub
     const rest = restRaw
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
-    if (sub === 'loop') return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [loopPrompt(rest.join(' '), language, autonomy)] }
+    if (sub === 'loop') {
+      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+      const prompt = loopPrompt(rest.join(' '), language, autonomy)
+      if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [prompt] }
+      launchTurn(prompt, t.launchRefused)
+
+      return { text: `${t.loopStarting(rest.join(' '))}${note}`, isTextDisplayOnly: true }
+    }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
     if (sub === 'ask') {
@@ -498,8 +522,21 @@ export const register: Register = (on, options) => {
       // the user's /wv is the opt-in, the script travels verbatim and the request only in args.
       const repo = await $.session.repo().catch(() => null)
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
+      // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
+      await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+      // The script goes to a file so the prompt that starts the turn stays short (`scriptPath`).
+      const scriptPath = `${askArgs.repoRoot}/${ASK_SCRIPT_DIR}/${ASK_SCRIPT_FILE}`
+      let prompt: string
+      try {
+        await $.fs.write(scriptPath, askWorkflowScript())
+        prompt = launchPrompt(args, language, askArgs, scriptPath)
+      } catch {
+        prompt = launchPrompt(args, language, askArgs, null)
+      }
+      if (!launchTurn) return { text: t.askLaunched(clip(args, 80)), context: [prompt] }
+      launchTurn(prompt, t.launchRefused)
 
-      return { text: t.askLaunched(clip(args, 80)), context: [launchPrompt(args, language, askArgs)] }
+      return { text: t.askLaunched(clip(args, 80)), isTextDisplayOnly: true }
     }
     if (sub === 'unknown') return { text: t.unknownSubcommand(first), isTextDisplayOnly: true }
     if (sub === 'objectives') {
