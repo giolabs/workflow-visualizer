@@ -10,7 +10,10 @@ import type { JiraConfig, JiraIssue, JiraSprint } from './jira'
 import { matchObjectives, scanObjectives, summarize, touchesArtifacts } from './objectives'
 import type { ObjectiveCatalog } from './objectives'
 import type { HistorySession } from './history'
+import { ASK_WORKFLOW_NAME, askWorkflowScript } from './ask-workflow'
+import type { AskArgs } from './ask-workflow'
 import { describeTool } from './describe'
+import { VERSION } from './version'
 import { usdOf } from './pricing'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
@@ -221,6 +224,24 @@ function resolveSubcommand(first: string, hasMore: boolean): { sub: Subcommand; 
   return { sub: hasMore ? 'ask' : 'unknown', corrected: false }
 }
 
+/** The exact Workflow call the orchestrator makes for a /wv request, and what to do with its result. */
+function launchPrompt(request: string, language: Language, askArgs: AskArgs): string {
+  const lang = language === 'es' ? 'Spanish (rioplatense)' : 'English'
+
+  return [
+    `The user typed \`/wv ${request}\` to the workflow-visualizer plugin. That slash command is their explicit opt-in to multi-agent orchestration: call the Workflow tool NOW, before anything else, with exactly these inputs and no changes to the script text:`,
+    '',
+    'Workflow input `script` (verbatim):',
+    '```js',
+    askWorkflowScript().trim(),
+    '```',
+    '',
+    `Workflow input \`args\` (JSON, pass as an object): ${JSON.stringify(askArgs)}`,
+    '',
+    `Then say in one line, in ${lang}, that the \`${ASK_WORKFLOW_NAME}\` research is running and visible in the rack. Do not investigate yourself and do not start loop-mode. When the workflow's task notification arrives, present the synthesizer's answer as it is, in ${lang}, keeping its citations; if it ends with numbered options, ask them through AskUserQuestion with the recommended one first. If a source was unavailable (for example Jira not authenticated), say so and point to /mcp for Jira.`,
+  ].join('\n')
+}
+
 /** A free-text request after /wv, handed to the model with the visualizer's context. */
 function askPrompt(request: string, language: Language): string {
   const lang = language === 'es' ? 'Spanish (rioplatense)' : 'English'
@@ -236,25 +257,25 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
   const lines =
     language === 'es'
       ? [
-          `${t.paneTitle} — subcomandos:`,
+          `${t.versionLine(VERSION)} — subcomandos:`,
           '/wv            abre el pane del rack',
           '/wv loop <tickets>   corre la orquestación loop-mode sobre esos tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   reporte de productividad (tokens, costo, por modelo/workflow/ticket, sprint)',
           '/wv jira       estado de la conexión con Jira y el sprint abierto del proyecto configurado',
           '/wv objectives [rescan]   ADR, specs, OpenSpec, GSD y tickets locales del repo, con estado y costo de agentes',
           '/wv help       esta ayuda',
-          '/wv <pedido en palabras>   se lo pasa al orquestador con el contexto del visualizer (p. ej. "/wv tickets del ADR-050 en backlog")',
+          '/wv <pedido en palabras>   lanza el workflow wv-ask (repo + Jira + git → síntesis) y lo muestra en el rack (p. ej. "/wv tickets del ADR-050 en backlog")',
           `Config: idioma=${language}, modo=${autonomy}. Cambialos en /config → workflow-visualizer (también /wv config).`,
         ]
       : [
-          `${t.paneTitle} — subcommands:`,
+          `${t.versionLine(VERSION)} — subcommands:`,
           '/wv            open the rack pane',
           '/wv loop <tickets>   run the loop-mode orchestration over those tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   productivity report (tokens, cost, by model/workflow/ticket, sprint)',
           '/wv jira       Jira connection status and the open sprint of the configured project',
           '/wv objectives [rescan]   the repo\'s ADRs, specs, OpenSpec changes, GSD phases and local tickets, with status and agent cost',
           '/wv help       this help',
-          '/wv <request in plain words>   hands it to the orchestrator with the visualizer context (e.g. "/wv tickets of ADR-050 in backlog")',
+          '/wv <request in plain words>   launches the wv-ask workflow (repo + Jira + git → synthesis) and shows it in the rack (e.g. "/wv tickets of ADR-050 in backlog")',
           `Config: language=${language}, mode=${autonomy}. Change them in /config → workflow-visualizer (also /wv config).`,
         ]
 
@@ -471,7 +492,15 @@ export const register: Register = (on, options) => {
     if (sub === 'loop') return { text: `${t.loopStarting(rest.join(' '))}${note}`, context: [loopPrompt(rest.join(' '), language, autonomy)] }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
-    if (sub === 'ask') return { text: t.askStarting, context: [askPrompt(args, language)] }
+    if (sub === 'ask') {
+      // The engine does not let a plugin call the Workflow tool itself (its agents run outside the
+      // bound on plugin spawns), so the launch is handed to the orchestrator as an exact instruction:
+      // the user's /wv is the opt-in, the script travels verbatim and the request only in args.
+      const repo = await $.session.repo().catch(() => null)
+      const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
+
+      return { text: t.askLaunched(clip(args, 80)), context: [launchPrompt(args, language, askArgs)] }
+    }
     if (sub === 'unknown') return { text: t.unknownSubcommand(first), isTextDisplayOnly: true }
     if (sub === 'objectives') {
       const catalog = await refreshCatalog($, rest.includes('rescan'))
@@ -603,9 +632,13 @@ export const register: Register = (on, options) => {
     const spawner = e.parentAgentId ?? MAIN
     const note = t.launched(mascot(agent.model), clip(agent.description, 40))
     await update($, rack, s => {
-      const runs = s.runs.map(r =>
+      let runs = s.runs.map(r =>
         r.key === runKey && e.workflow && r.runId === undefined ? { ...r, runId: e.workflow.runId } : r,
       )
+      if (e.workflow && !runs.some(r => r.key === runKey)) {
+        // A run whose Workflow call this plugin did not see (a resumed or server-launched run).
+        runs = capRuns([...runs, { key: runKey, runId: e.workflow.runId, name: t.defaultRun, startedAt: now }])
+      }
       const hasSolo = runs.some(r => r.key === SOLO)
       const withSolo =
         runKey === SOLO && !hasSolo ? [...runs, { key: SOLO, name: t.soloRun, startedAt: now }] : runs

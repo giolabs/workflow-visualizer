@@ -14,6 +14,8 @@ export type Strings = {
   paneOpened: string
   loopStarting: (args: string) => string
   askStarting: string
+  askLaunched: (request: string) => string
+  versionLine: (version: string) => string
   interpretedAs: (sub: string) => string
   configHint: string
   unknownSubcommand: (sub: string) => string
@@ -117,6 +119,8 @@ const en: Strings = {
   paneOpened: 'Workflow Visualizer opened.',
   loopStarting: args => `Starting loop-mode for: ${args || '(no tickets given: the orchestrator will ask)'}…`,
   askStarting: 'Handing your request to the orchestrator with the visualizer context…',
+  askLaunched: request => `Launching the wv-ask workflow for: ${request} — 3 researchers (repo, Jira, git) + 1 synthesizer; watch them in the rack.`,
+  versionLine: version => `workflow-visualizer ${version}`,
   interpretedAs: sub => `(read as "${sub}")`,
   configHint: 'Settings live in /config → workflow-visualizer (language, decision mode, Jira project, points field, MCP server).',
   unknownSubcommand: sub => `Unknown subcommand "${sub}". Type /wv help for the list, or write a request in plain words after /wv.`,
@@ -217,6 +221,8 @@ const es: Strings = {
   paneOpened: 'Workflow Visualizer abierto.',
   loopStarting: args => `Arrancando loop-mode para: ${args || '(sin tickets: el orquestador los va a pedir)'}…`,
   askStarting: 'Pasando tu pedido al orquestador con el contexto del visualizer…',
+  askLaunched: request => `Lanzando el workflow wv-ask para: ${request} — 3 investigadores (repo, Jira, git) + 1 sintetizador; miralos en el rack.`,
+  versionLine: version => `workflow-visualizer ${version}`,
   interpretedAs: sub => `(leído como "${sub}")`,
   configHint: 'La configuración está en /config → workflow-visualizer (idioma, modo de decisión, proyecto Jira, campo de puntos, servidor MCP).',
   unknownSubcommand: sub => `Subcomando desconocido "${sub}". Tipeá /wv help para la lista, o escribí un pedido en palabras después de /wv.`,
