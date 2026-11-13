@@ -239,7 +239,7 @@ test('the JQL quotes the project key and a missing issue does not stop enrichmen
   expect(issues).toContain('MH-5')
 })
 
-test('/wv <request> writes the wv-ask script, submits the launch prompt as the plugin, and opens the pane focused', async ($, on) => {
+test('/wv <request> submits the launch prompt with the script inline, after the command answered, and opens the pane focused', async ($, on) => {
   const opened: unknown[] = []
   const submitted: string[] = []
   const written: Record<string, string> = {}
@@ -251,12 +251,13 @@ test('/wv <request> writes the wv-ask script, submits the launch prompt as the p
   expect(out.context).toBeUndefined()
   expect(submitted.length).toBe(0)
   await clock.advance(1)
-  expect(written['/repo/.workflow-visualizer/wv-ask.js']).toMatch(/name: 'wv-ask'/)
-  expect(written['/repo/.workflow-visualizer/wv-ask.js']).not.toMatch(/ADR-050/)
+  expect(Object.keys(written)).toEqual([])
   expect(submitted.length).toBe(1)
   const prompt = submitted[0] ?? ''
   expect(prompt).toMatch(/call the Workflow tool NOW/)
-  expect(prompt).toMatch(/scriptPath`: \/repo\/\.workflow-visualizer\/wv-ask\.js/)
+  expect(prompt).toMatch(/name: 'wv-ask'/)
+  const script = prompt.slice(prompt.indexOf('export const meta'), prompt.indexOf('Workflow input `args`'))
+  expect(script).not.toMatch(/ADR-050/)
   const argsLine = prompt.split('\n').find(l => l.startsWith('Workflow input `args`')) ?? ''
   const parsed = JSON.parse(argsLine.slice(argsLine.indexOf('{')))
   expect(parsed.request).toBe('Revisar los tickets de ADR-050')
