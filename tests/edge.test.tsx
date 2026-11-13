@@ -41,9 +41,11 @@ function world(on: On, extra: Partial<{ store: Record<string, unknown>; fs: fals
 
     return { value: undefined }
   })
+  const session = mock.session(on)
   on('prompt.submit', (_, e) => {
     if (extra.dropPrompts) return { drop: 'not now' }
-    extra.submitted?.push(e.text)
+    const notes = session.appended().filter(r => r.door === 'note').map(r => r.message.content.map(b => ('text' in b ? b.text : '')).join(''))
+    extra.submitted?.push([e.text, ...notes].join('\n---\n'))
 
     return { text: e.text, origin: e.origin }
   })
@@ -254,6 +256,7 @@ test('/wv <request> submits the launch prompt with the script inline, after the 
   expect(Object.keys(written)).toEqual([])
   expect(submitted.length).toBe(1)
   const prompt = submitted[0] ?? ''
+  expect(prompt.split('\n---\n')[0]).toBe('Launching the wv-ask workflow for: Revisar los tickets de ADR-050 — 3 researchers (repo, Jira, git) + 1 synthesizer; watch them in the rack. (/wv)')
   expect(prompt).toMatch(/call the Workflow tool NOW/)
   expect(prompt).toMatch(/name: 'wv-ask'/)
   const script = prompt.slice(prompt.indexOf('export const meta'), prompt.indexOf('Workflow input `args`'))

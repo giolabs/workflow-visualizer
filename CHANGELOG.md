@@ -6,6 +6,13 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Fixed
+- The prompt that starts the turn for `/wv loop …` and `/wv <request>` is one line; the instructions
+  and the `wv-ask` script go in as hidden user rows (`$.session.append`) the model reads and the
+  transcript does not show.
+- When the rack pane cannot be drawn yet, the command says so with the engine's reason instead of
+  staying silent.
+
 ## [0.4.0-beta.4] - 2026-11-13
 
 ### Fixed
