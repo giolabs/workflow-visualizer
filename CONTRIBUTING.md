@@ -54,15 +54,21 @@ transcript prints when a hook fails.
 Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`). Commits are authored by the person
 driving the change, with `Co-Authored-By:` lines for anyone (or any model) that co-wrote it.
 
-Releases are tag-driven:
+**Every change reaches `main` through a pull request** — code, docs, CHANGELOG and version bumps
+alike. A ruleset on `main` requires a PR and blocks force pushes and deletion, with no bypass.
 
-1. Add a `## [<version>] - <date>` section to `CHANGELOG.md` (move items out of `[Unreleased]`).
-2. On a clean, synced `main`, run `scripts/release.sh <version>`: it bumps
-   `.claude-plugin/plugin.json`, commits `release: v<version>`, tags `v<version>` and pushes.
-3. The `release` GitHub workflow validates and tests the plugin, takes the CHANGELOG section as
-   release notes and publishes the GitHub release. A version with a suffix (`0.5.0-beta.1`,
-   `0.5.0-rc.1`) is published as a **pre-release**; betas are how a version is tried before it is
-   declared stable.
+Releases are prepared as a PR and tagged after the merge:
+
+1. Write the notes under `## [Unreleased]` in `CHANGELOG.md` as you go.
+2. On a clean, synced `main`, run `scripts/release.sh <version>`: it creates `release/v<version>`,
+   bumps `.claude-plugin/plugin.json`, turns the `[Unreleased]` notes into `## [<version>] - <date>`,
+   commits, pushes and opens the release PR.
+3. Review and merge that PR. Then, on an up-to-date `main`, run `scripts/tag-release.sh <version>`:
+   it checks `plugin.json` and the CHANGELOG carry the version and pushes the tag `v<version>`.
+4. The `release` GitHub workflow runs a read-only `verify` job (tag reachable from `main`, version
+   match, validate, tests) and a `publish` job that creates the GitHub release from the CHANGELOG
+   section. A version with a suffix (`0.5.0-beta.1`, `0.5.0-rc.1`) is published as a
+   **pre-release**; betas are how a version is tried before it is declared stable.
 
 Users install a specific version with
 `/plugin install workflow-visualizer@<version> --marketplace giolabs/workflow-visualizer`.

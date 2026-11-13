@@ -6,6 +6,11 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Changed
+- Releases are prepared as a pull request (`scripts/release.sh` bumps the version and stamps the
+  CHANGELOG section on a `release/v<version>` branch) and tagged after the merge with
+  `scripts/tag-release.sh`; a ruleset on `main` requires pull requests and blocks force pushes.
+
 ## [0.4.0-beta.2] - 2026-11-13
 
 Second public beta: the security-audit fixes and a usable `/wv` dispatcher.
