@@ -34,6 +34,10 @@ export type Strings = {
   booting: string
   bootedAs: (type: string) => string
   adoptedAs: (type: string) => string
+  modelChosen: (tier: string, reason: string, matched: string) => string
+  modelReason: Record<string, string>
+  poweredOff: string
+  chosenLabel: string
   launched: (mascot: string, desc: string) => string
   received: (mascot: string, desc: string) => string
   failedChild: (mascot: string, desc: string) => string
@@ -142,6 +146,10 @@ const en: Strings = {
   booting: 'Booting…',
   bootedAs: t => `Booted as ${t}`,
   adoptedAs: t => `Found running as ${t} (spawned outside the plugin's view)`,
+  modelChosen: (tier, reason, matched) => `Orchestrator picked ${tier}: ${reason} ("${matched}")`,
+  modelReason: { review: 'review or verification', architecture: 'architecture or decision', ui: 'UI work', synthesis: 'synthesis', implementation: 'implementation', tests: 'tests', research: 'read-only research', 'explore-type': 'an Explore agent', 'plan-type': 'a Plan agent', default: 'no signal in the task' },
+  poweredOff: 'powered off',
+  chosenLabel: 'Model:  ',
   launched: (m, d) => `Launched ${m} ${d}`,
   received: (m, d) => `Received ${m} ${d}`,
   failedChild: (m, d) => `Failed ${m} ${d}`,
@@ -247,6 +255,10 @@ const es: Strings = {
   booting: 'Arrancando…',
   bootedAs: t => `Encendido como ${t}`,
   adoptedAs: t => `Encontrado corriendo como ${t} (lanzado fuera de la vista del plugin)`,
+  modelChosen: (tier, reason, matched) => `El orquestador eligió ${tier}: ${reason} ("${matched}")`,
+  modelReason: { review: 'review o verificación', architecture: 'arquitectura o decisión', ui: 'trabajo de UI', synthesis: 'síntesis', implementation: 'implementación', tests: 'tests', research: 'investigación de solo lectura', 'explore-type': 'agente Explore', 'plan-type': 'agente Plan', default: 'sin señal en la tarea' },
+  poweredOff: 'apagados',
+  chosenLabel: 'Modelo: ',
   launched: (m, d) => `Lanzó ${m} ${d}`,
   received: (m, d) => `Recibió ${m} ${d}`,
   failedChild: (m, d) => `Falló ${m} ${d}`,

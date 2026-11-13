@@ -337,3 +337,60 @@ test('an agent whose spawn the plugin never saw (a skill in a subagent) gets a t
   expect(await ui.find({ type: 'Text', text: /code-review high/, in: 'rack' })).toBeDefined()
   await ui.unmount()
 })
+
+test('a spawn without a model gets the tier the task deserves, and one with a model is left alone', async ($, on) => {
+  world(on)
+  const seen: (string | undefined)[] = []
+  on('agent.spawn', (_, e) => {
+    seen.push(e.model)
+
+    return { model: e.model === 'haiku' ? 'claude-haiku-5-5' : 'claude-sonnet-5-5', agentId: `ag-${seen.length}` }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, model: undefined, description: 'search the repo', prompt: 'Search docs/ and list every spec that names BO-548' })
+  await $.agent.spawn({ ...SPAWN, model: undefined, description: 'implement', prompt: 'Implement the cron and its tests' })
+  await $.agent.spawn({ ...SPAWN, model: 'opus', description: 'search the repo', prompt: 'Search docs/' })
+  await $.agent.spawn({ ...SPAWN, model: undefined, fork: true, description: 'search the repo', prompt: 'Search docs/' })
+  expect(seen).toEqual(['haiku', 'sonnet', 'opus', undefined])
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.resize({ columns: 100, rows: 40, in: 'rack' })
+  await ui.key({ key: 'right', in: 'rack' })
+  await ui.key({ key: 'return', in: 'rack' })
+  expect(await ui.find({ type: 'Text', text: /read-only research/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with modelPolicy off the plugin never touches a spawn\'s model', { options: { modelPolicy: 'off' } }, async ($, on) => {
+  world(on)
+  const seen: (string | undefined)[] = []
+  on('agent.spawn', (_, e) => {
+    seen.push(e.model)
+
+    return { model: 'claude-sonnet-5-5', agentId: 'ag-off' }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, model: undefined, description: 'search the repo', prompt: 'Search docs/' })
+  expect(seen).toEqual([undefined])
+})
+
+test('a finished agent leaves the rack a minute after its report and is counted as powered off', async ($, on) => {
+  const clock = world(on)
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag-done' }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn(SPAWN)
+  await $.turn.complete({ answer: 'done', durationMs: 1_000, isAborted: false, turnId: 't1', agentId: 'ag-done', reason: 'answer' })
+
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /1 servers/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
+
+  await clock.advance(61_000)
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /0 servers · 1 powered off/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
+
+  const report = await $.command.run(RUN('report all'))
+  expect(report.text).toMatch(/1 ok/)
+})

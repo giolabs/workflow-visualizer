@@ -6,6 +6,17 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Added
+- The orchestrator's own reasoning (`hooks/brain.ts`), first two decisions:
+  - **Model per task.** When a subagent is spawned without a model (no `model` on the Agent call
+    or Workflow script), the plugin picks the tier the task deserves from its description and
+    prompt, in English or Spanish: read-only research → haiku; implementation and tests → sonnet;
+    review, architecture/ADR, UI and synthesis → opus (agent types `Explore` → haiku, `Plan` → opus;
+    no signal → sonnet). Forks, teammates, resumed runs and plugin agent types are never touched.
+    The tile logs the choice and its reason; `modelPolicy: off` in the plugin settings disables it.
+  - **Power-off.** A finished agent stays a minute on the rack with its report and cost, then
+    powers off; the header counts the powered-off agents and `/wv report` keeps every one.
+
 ## [0.4.0-beta.6] - 2026-11-13
 
 ### Fixed

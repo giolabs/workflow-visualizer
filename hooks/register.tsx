@@ -1,4 +1,6 @@
 import { atom, read, update } from 'claude-code'
+import { chooseModel, isCoolingDown, isPoweredOff, shouldChooseModel } from './brain'
+import type { ModelPolicy } from './brain'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { RackAgent, RackCatalog, RackPhase, RackRun, RackState, RackTicket } from '../types'
@@ -208,6 +210,7 @@ function toClient(a: RackAgent, runName: string, catalog: ObjectiveCatalog | und
     answer: a.answer ?? null,
     usd: usdOf(a),
     files: a.files,
+    chosen: a.chosen ? { tier: a.chosen.tier, reason: a.chosen.reason } : null,
     objectives: catalog ? matchObjectives(catalog, a) : [],
   }
 }
@@ -477,6 +480,7 @@ async function allHistory($: StoreDollar & SessionDollar, state: RackState): Pro
 export const register: Register = (on, options) => {
   const language = asLanguage(options.language)
   const autonomy = options.autonomy === 'autonomous' ? 'autonomous' : 'hitl'
+  const modelPolicy: ModelPolicy = options.modelPolicy === 'off' ? 'off' : 'auto'
   const t = strings(language)
   const jira: JiraConfig = {
     server: typeof options.jiraServer === 'string' && options.jiraServer ? options.jiraServer : 'claude.ai Atlassian',
@@ -506,7 +510,8 @@ export const register: Register = (on, options) => {
     $.clock.every(1000, () => {
       void (async () => {
         const state = await read($, rack)
-        const live = state.agents.some(isLive) || state.main?.status === 'running'
+        const now = await $.clock.now()
+        const live = state.agents.some(isLive) || state.main?.status === 'running' || state.agents.some(a => isCoolingDown(a, now))
         if (live) await update($, tick, n => n + 1)
       })()
     })
@@ -522,6 +527,7 @@ export const register: Register = (on, options) => {
       `The workflow-visualizer plugin is active. Converse with the user in ${lang}; keep code, commits, file names and docs in English unless the project says otherwise.`,
       'Whenever a decision is the user\'s to make, ask it with AskUserQuestion: 2-4 options, the recommended one first and labeled "(Recommended)", each with a one-line reason. Never leave a question in prose.',
       `Loop runs default to ${autonomy === 'autonomous' ? 'autonomous mode' : 'human-in-the-loop mode'} ("/wv loop <tickets>"); the user can switch it per run.`,
+      ...(modelPolicy === 'auto' ? ['When you spawn a subagent without naming a model, the plugin picks one from the task (research → haiku, implementation and tests → sonnet, review, architecture, UI and synthesis → opus) and shows the choice in the rack; name a model only when the task needs a specific one.'] : []),
     ].join('\n')
 
     return { sections: [...composed.sections, { id: 'workflow-visualizer', text, scope: 'session' }] }
@@ -661,7 +667,10 @@ export const register: Register = (on, options) => {
 
   on('agent.spawn', async ($, e, next) => {
     const now = await $.clock.now()
-    const started = await next(e)
+    // The orchestrator's call: a model for the task when nobody fixed one (brain.ts).
+    const facts = { description: e.description, prompt: e.prompt, subagentType: e.subagentType, model: e.model, fork: e.fork, isTeammate: e.isTeammate === true, isResume: e.resume !== undefined }
+    const chosen = shouldChooseModel(modelPolicy, facts) ? chooseModel(facts) : undefined
+    const started = await next(chosen ? { ...e, model: chosen.tier } : e)
     if (started.deny !== undefined || started.agentId === undefined) return started
 
     const runKey = e.workflow ? e.tool_use_id : SOLO
@@ -686,9 +695,12 @@ export const register: Register = (on, options) => {
       tools: 0,
       turns: 0,
       doing: t.booting,
-      log: [{ at: now, text: t.bootedAs(e.subagentType) }],
+      log: chosen
+        ? [{ at: now, text: t.bootedAs(e.subagentType) }, { at: now, text: t.modelChosen(chosen.tier, t.modelReason[chosen.reason] ?? chosen.reason, chosen.matched) }]
+        : [{ at: now, text: t.bootedAs(e.subagentType) }],
       history: [],
       files: [],
+      chosen,
     }
     lastPhase.set(agent.id, 'boot')
     const spawner = e.parentAgentId ?? MAIN
@@ -921,7 +933,10 @@ export const register: Register = (on, options) => {
     }
     const runName = (key: string) => state.runs.find(r => r.key === key)?.name ?? t.defaultRun
     const catalog = state.objectives
-    const agents = state.agents.map(a => toClient(a, runName(a.runKey), catalog))
+    // A finished agent stays a minute with its report and cost, then powers off the rack (brain.ts);
+    // /wv report keeps it.
+    const shown = state.agents.filter(a => !isPoweredOff(a, now))
+    const agents = shown.map(a => toClient(a, runName(a.runKey), catalog))
     const main = toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog)
     // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
     // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
@@ -942,6 +957,7 @@ export const register: Register = (on, options) => {
       agentsTokens: state.agents.reduce((n, a) => n + totalOf(a), 0),
       agentsUsd: state.agents.reduce((n, a) => n + (usdOf(a) ?? 0), 0),
       unpriced: state.agents.filter(a => usdOf(a) === null).length,
+      off: state.agents.length - shown.length,
     }
     const rows = Math.max(8, e.props.scroll.bodyRows)
 

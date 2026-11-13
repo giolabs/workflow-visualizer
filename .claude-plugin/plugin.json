@@ -45,6 +45,16 @@
       ],
       "default": "hitl"
     },
+    "modelPolicy": {
+      "type": "string",
+      "title": "Model choice for subagents",
+      "description": "'auto' lets the plugin pick a subagent's model from its task when nobody named one (research → haiku, implementation → sonnet, review/architecture/UI/synthesis → opus); 'off' never touches it.",
+      "options": [
+        "auto",
+        "off"
+      ],
+      "default": "auto"
+    },
     "jiraProject": {
       "type": "string",
       "title": "Jira project key",
