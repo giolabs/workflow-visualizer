@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.8] - 2026-11-14
+
 ### Fixed
 - A rack that went blank stayed blank: the engine unmounts a `Client` whose render outruns its
   one-second budget (`rack-client.tsx: ran longer than its 1000ms budget`, seen under load) and,
