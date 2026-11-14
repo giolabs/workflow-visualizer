@@ -17,6 +17,7 @@ import type { AskArgs } from './ask-workflow'
 import { describeTool } from './describe'
 import { VERSION } from './version'
 import { usdOf } from './pricing'
+import { faulted, freshSlot, slotKey } from './rack-slot'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
 
@@ -42,6 +43,9 @@ const tick = atom({ plugin: 'workflow-visualizer', key: 'tick' } as const, 0)
 // Last phase written per loop: a thinking or text stream arrives in many
 // chunks and only a change is worth a state write. Module-local on purpose.
 const lastPhase = new Map<string, RackPhase>()
+
+// The rack Client's slot (rack-slot.ts). Module-local on purpose: a reload starts over.
+let slot = freshSlot()
 
 function mascot(model: string): string {
   const m = (model ?? '').toLowerCase()
@@ -917,6 +921,17 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  on('ui.fault', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const before = slot
+    slot = faulted(slot, e.element, await $.clock.now(), e.reason)
+    if (slot !== before) {
+      $.ui.log(`rack client ${e.phase} fault (${e.reason}): ${slot.halted ? 'falling back to plain rows' : `mounting again as ${slotKey(slot)}`}`, { to: 'debug' })
+      $.ui.invalidate('ui.render')
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const state = await read($, rack)
     await read($, tick)
@@ -961,13 +976,13 @@ export const register: Register = (on, options) => {
     }
     const rows = Math.max(8, e.props.scroll.bodyRows)
 
-    if (e.surface === 'terminal' || e.surface === 'desktop') {
+    if ((e.surface === 'terminal' || e.surface === 'desktop') && slot.halted === null) {
       const { Box, Client } = $.ui.resolve(e)
       const props: RackProps = { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
 
       return (
         <Box flexDirection="column">
-          <Client key="rack" module="./rack-client.tsx" props={props} width="100%" height={rows} />
+          <Client key={slotKey(slot)} module="./rack-client.tsx" props={props} width="100%" height={rows} />
         </Box>
       )
     }
@@ -979,6 +994,7 @@ export const register: Register = (on, options) => {
         <Text bold color="claude">
           🏟 {t.paneTitle.toUpperCase()}
         </Text>
+        {slot.halted !== null && <Text color="warning">{t.rackHalted(slot.halted)}</Text>}
         <Text>
           🎛 {main.description} · {main.doing} · {fmtTok(main.input + main.output + main.cacheRead + main.cacheWrite)} tok
         </Text>

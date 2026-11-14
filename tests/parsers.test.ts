@@ -7,6 +7,7 @@ import { strings } from '../hooks/i18n'
 import { idFor, matchObjectives, normalizeStatus, statusOf, titleOf, touchesArtifacts } from '../hooks/objectives'
 import { priceOf, usdOf } from '../hooks/pricing'
 import { fit, spark, wrap } from '../hooks/rack-client'
+import { RACK_FAULTS_MAX, faulted, freshSlot, slotKey } from '../hooks/rack-slot'
 import { base, clip, sanitize, workflowName } from '../hooks/text'
 import { cell, isTicketKey, table } from '../hooks/history'
 
@@ -242,4 +243,30 @@ test('a finished agent powers off a minute after its report, a live one never', 
   expect(isPoweredOff({ status: 'done', endedAt: 1_000 }, 61_000)).toBe(true)
   expect(isPoweredOff({ status: 'failed', endedAt: 1_000 }, 60_999)).toBe(false)
   expect(isPoweredOff({ status: 'running' }, 999_999)).toBe(false)
+})
+
+test('a rack Client fault rotates the key once per instance; faults piling up turn the rack view off', () => {
+  const T = 1_700_000_000_000
+  let slot = freshSlot()
+  expect(slotKey(slot)).toBe('rack')
+
+  slot = faulted(slot, 'rack', T, 'ran longer than its 1000ms budget')
+  expect(slotKey(slot)).toBe('rack-1')
+  expect(slot.halted).toBeNull()
+
+  // A late report on the instance already replaced changes nothing.
+  expect(faulted(slot, 'rack', T + 1, 'again')).toBe(slot)
+
+  // Faults spread over more than a minute never pile up.
+  for (let i = 0; i < 20; i++) slot = faulted(slot, slotKey(slot), T + (i + 1) * 61_000, 'slow')
+  expect(slot.halted).toBeNull()
+  expect(slot.faults).toHaveLength(1)
+
+  // More than RACK_FAULTS_MAX within a minute: the view is off, with the last reason, and stays off.
+  const now = T + 30 * 61_000
+  for (let i = 0; i < RACK_FAULTS_MAX; i++) slot = faulted(slot, slotKey(slot), now + i, `fault ${i}`)
+  expect(slot.halted).toBeNull()
+  slot = faulted(slot, slotKey(slot), now + RACK_FAULTS_MAX, 'one too many')
+  expect(slot.halted).toBe('one too many')
+  expect(faulted(slot, slotKey(slot), now + 99, 'later')).toBe(slot)
 })
