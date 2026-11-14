@@ -29,7 +29,6 @@ export type ClientAgent = {
   history: number[]
   answer: string | null
   usd: number | null
-  files: string[]
   chosen: { tier: string; reason: string } | null
   objectives: { id: string; via: 'text' | 'file' | 'branch' }[]
 }

@@ -6,6 +6,18 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Fixed
+- A rack that went blank stayed blank: the engine unmounts a `Client` whose render outruns its
+  one-second budget (`rack-client.tsx: ran longer than its 1000ms budget`, seen under load) and,
+  for a fault after it had drawn, keeps the slot empty while the pane asks for the same key. The
+  plugin now hears `ui.fault` and mounts a fresh instance under a new key; after five faults in a
+  minute it falls back to plain rows and says why.
+- After a long loop the rack stopped drawing: each agent's props carried its whole task, answer,
+  log and touched files, so a dozen agents serialised past the engine's 100k-character bound on a
+  `Client`'s props. The Client now gets only what a tile or the detail panel can show, and when
+  agents still pile up past the bound the oldest finished ones leave the rack and count as
+  powered off.
+
 ## [0.4.0-beta.7] - 2026-11-13
 
 ### Added

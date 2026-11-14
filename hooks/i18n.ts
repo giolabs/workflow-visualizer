@@ -81,6 +81,7 @@ export type Strings = {
   rackIdle: string
   sumAgents: string
   unpriced: (n: number) => string
+  rackHalted: (reason: string) => string
   keysHint: string
   turn: string
   roleLabel: string
@@ -191,6 +192,7 @@ const en: Strings = {
   rackIdle: 'rack idle',
   sumAgents: 'Σ agents',
   unpriced: n => ` (+${n} unpriced)`,
+  rackHalted: reason => `⚠ rack view off after repeated failures (${reason}); plain rows until the plugin reloads`,
   keysHint: '←→↑↓ enter ?',
   turn: 'turn',
   roleLabel: 'Role: ',
@@ -298,6 +300,7 @@ const es: Strings = {
   rackIdle: 'rack en reposo',
   sumAgents: 'Σ agentes',
   unpriced: n => ` (+${n} sin precio)`,
+  rackHalted: reason => `⚠ vista rack apagada tras fallas repetidas (${reason}); filas simples hasta recargar el plugin`,
   turn: 'turno',
   roleLabel: 'Función: ',
   roleText: 'lanza agentes y workflows, junta sus reportes y te responde',
