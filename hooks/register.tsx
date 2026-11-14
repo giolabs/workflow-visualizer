@@ -18,6 +18,7 @@ import { describeTool } from './describe'
 import { VERSION } from './version'
 import { usdOf } from './pricing'
 import { faulted, freshSlot, slotKey } from './rack-slot'
+import { fitProps, slim } from './rack-props'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
 
@@ -213,7 +214,6 @@ function toClient(a: RackAgent, runName: string, catalog: ObjectiveCatalog | und
     history: a.history,
     answer: a.answer ?? null,
     usd: usdOf(a),
-    files: a.files,
     chosen: a.chosen ? { tier: a.chosen.tier, reason: a.chosen.reason } : null,
     objectives: catalog ? matchObjectives(catalog, a) : [],
   }
@@ -951,8 +951,8 @@ export const register: Register = (on, options) => {
     // A finished agent stays a minute with its report and cost, then powers off the rack (brain.ts);
     // /wv report keeps it.
     const shown = state.agents.filter(a => !isPoweredOff(a, now))
-    const agents = shown.map(a => toClient(a, runName(a.runKey), catalog))
-    const main = toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog)
+    const agents = shown.map(a => slim(toClient(a, runName(a.runKey), catalog)))
+    const main = slim(toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog))
     // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
     // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
     const named = new Set<string>()
@@ -978,7 +978,9 @@ export const register: Register = (on, options) => {
 
     if ((e.surface === 'terminal' || e.surface === 'desktop') && slot.halted === null) {
       const { Box, Client } = $.ui.resolve(e)
-      const props: RackProps = { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
+      // Texts are already clipped (slim); a long loop can still pile up more agents than the engine's
+      // 100k-character bound on props takes, so the oldest finished ones leave the rack first.
+      const props = fitProps({ now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null })
 
       return (
         <Box flexDirection="column">

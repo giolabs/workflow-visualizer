@@ -8,6 +8,7 @@ import { idFor, matchObjectives, normalizeStatus, statusOf, titleOf, touchesArti
 import { priceOf, usdOf } from '../hooks/pricing'
 import { fit, spark, wrap } from '../hooks/rack-client'
 import { RACK_FAULTS_MAX, faulted, freshSlot, slotKey } from '../hooks/rack-slot'
+import { PROPS_BUDGET, fitProps, propsSize, slim } from '../hooks/rack-props'
 import { base, clip, sanitize, workflowName } from '../hooks/text'
 import { cell, isTicketKey, table } from '../hooks/history'
 
@@ -269,4 +270,38 @@ test('a rack Client fault rotates the key once per instance; faults piling up tu
   slot = faulted(slot, slotKey(slot), now + RACK_FAULTS_MAX, 'one too many')
   expect(slot.halted).toBe('one too many')
   expect(faulted(slot, slotKey(slot), now + 99, 'later')).toBe(slot)
+})
+
+test('rack props stay under the engine bound: texts are clipped and the oldest finished agents leave first', () => {
+  const big = (i: number, status: 'running' | 'done'): import('../hooks/rack-client').ClientAgent => ({
+    id: `ag-${i}`, runKey: 'wf_1', runName: 'loop', index: i, parentId: null, type: 'general-purpose', model: 'claude-sonnet-5-5',
+    description: 'd'.repeat(300), task: 't'.repeat(5000), doing: 'x'.repeat(600), answer: 'a'.repeat(5000),
+    status, phase: status === 'done' ? 'off' : 'tool', startedAt: 1_000 + i, endedAt: status === 'done' ? 2_000 + i : null,
+    input: 1, output: 1, cacheRead: 1, cacheWrite: 1, steps: 1, tools: 1, turns: 1,
+    log: Array.from({ length: 14 }, (_, k) => ({ at: k, text: 'l'.repeat(400) })), history: Array.from({ length: 16 }, () => 12345), usd: 1,
+    chosen: null, objectives: [],
+  })
+  const s = slim(big(0, 'running'))
+  expect(s.task).toHaveLength(300)
+  expect(s.answer).toHaveLength(300)
+  expect(s.doing).toHaveLength(160)
+  expect(s.log).toHaveLength(8)
+  expect(s.log[0]!.text).toHaveLength(120)
+  expect(JSON.stringify(s).length).toBeLessThan(3_000)
+
+  const agents = Array.from({ length: 60 }, (_, i) => slim(big(i, i % 3 === 0 ? 'running' : 'done')))
+  const props: import('../hooks/rack-client').RackProps = {
+    now: 3_000, language: 'en', main: slim(big(999, 'running')), agents, tickets: {}, objectives: {}, branch: null,
+    session: { off: 2, contextPct: null, costUsd: null, workflows: 1, agents: 62, live: 20, agentsTokens: 1, agentsUsd: 1, unpriced: 0 },
+  }
+  expect(propsSize(props)).toBeGreaterThan(PROPS_BUDGET)
+  const fit = fitProps(props)
+  expect(propsSize(fit)).toBeLessThanOrEqual(PROPS_BUDGET)
+  expect(fit.agents.length).toBeGreaterThan(20)
+  expect(fit.session.off).toBe(2 + 60 - fit.agents.length)
+  // Every live agent stays; the finished ones that left are the oldest.
+  expect(fit.agents.filter(a => a.status === 'running')).toHaveLength(20)
+  const keptDone = fit.agents.filter(a => a.status === 'done').map(a => a.endedAt!)
+  const leftDone = agents.filter(a => a.status === 'done' && !fit.agents.includes(a)).map(a => a.endedAt!)
+  expect(Math.min(...keptDone)).toBeGreaterThan(Math.max(...leftDone))
 })

@@ -394,3 +394,19 @@ test('a finished agent leaves the rack a minute after its report and is counted 
   const report = await $.command.run(RUN('report all'))
   expect(report.text).toMatch(/1 ok/)
 })
+
+test('sixty agents with long prompts, answers and logs still draw the rack (Client props under the engine bound)', async ($, on) => {
+  world(on)
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: `ag-${n++}` }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 60; i++) {
+    await $.agent.spawn({ ...SPAWN, tool_use_id: `tu-${i}`, description: `worker ${i} ${'on a long description '.repeat(8)}`, prompt: 'Implement the whole module. '.repeat(200) })
+    if (i % 2 === 0) await $.turn.complete({ answer: 'Done: '.repeat(300), durationMs: 1_000, isAborted: false, turnId: `t${i}`, agentId: `ag-${i}`, reason: 'answer' })
+  }
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /ORCHESTRATOR/, in: 'rack' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\d+ servers/, in: 'rack' })).toBeDefined()
+  await ui.unmount()
+})
