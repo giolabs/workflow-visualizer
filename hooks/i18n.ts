@@ -82,6 +82,7 @@ export type Strings = {
   sumAgents: string
   unpriced: (n: number) => string
   rackHalted: (reason: string) => string
+  paneManual: string
   keysHint: string
   turn: string
   roleLabel: string
@@ -193,6 +194,7 @@ const en: Strings = {
   sumAgents: 'Σ agents',
   unpriced: n => ` (+${n} unpriced)`,
   rackHalted: reason => `⚠ rack view off after repeated failures (${reason}); plain rows until the plugin reloads`,
+  paneManual: 'The rack pane opens only with /wv (setting pane = manual).',
   keysHint: '←→↑↓ enter ?',
   turn: 'turn',
   roleLabel: 'Role: ',
@@ -301,6 +303,7 @@ const es: Strings = {
   sumAgents: 'Σ agentes',
   unpriced: n => ` (+${n} sin precio)`,
   rackHalted: reason => `⚠ vista rack apagada tras fallas repetidas (${reason}); filas simples hasta recargar el plugin`,
+  paneManual: 'El pane del rack se abre solo con /wv (opción pane = manual).',
   turn: 'turno',
   roleLabel: 'Función: ',
   roleText: 'lanza agentes y workflows, junta sus reportes y te responde',

@@ -27,7 +27,7 @@ const SPAWN = {
   fork: false,
 } as const
 
-function world(on: On) {
+function world(on: On, opts: { open?: boolean } = {}) {
   const submitted: string[] = []
   const session = mock.session(on)
   on('prompt.submit', (_, e) => {
@@ -42,7 +42,7 @@ function world(on: On) {
   on('session.usage', () => ({
     value: { startedAt: 0, context: { window: 1_000_000, percent: 12 }, rateLimits: [], cost: { usd: 1.5 } },
   }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  if (opts.open !== false) on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag-1' }))
   on('tool.call', () => ({ result: {} }))
@@ -244,4 +244,65 @@ test('repo ADRs and specs become objectives, matched by id in the task and by fi
   expect(report.text).toMatch(/Repo objectives/)
   expect(report.text).toMatch(/Artifacts in the repo/)
   expect(report.text).toMatch(/\| adr \| 1 \|/)
+})
+
+const WV = { command: 'wv', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } } as const
+
+test('on surfaces without a Client module the rack is drawn still by the hooks module', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.agent.spawn(SPAWN)
+
+  for (const surface of ['desktop', 'mobile', 'vscode'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Client' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /ORCHESTRATOR/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /reader/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 servers/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('an unasked pane open never takes the keyboard and is tried once until a surface places panes; /wv opens it anyway', async ($, on) => {
+  world(on, { open: false })
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  const opens: { focus?: true }[] = []
+  on('ui.open', (_, e) => {
+    opens.push({ focus: e.focus })
+
+    return { value: { isPlaced: false, reason: 'no attached surface places panes' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  for (let i = 0; i < 3; i++) await $.agent.spawn({ ...SPAWN, tool_use_id: `tu-${i}` })
+  expect(opens).toHaveLength(1)
+  expect(opens[0]!.focus).toBeUndefined()
+
+  // The person's own /wv asks again, still without focus where no terminal draws.
+  await $.command.run(WV)
+  expect(opens).toHaveLength(2)
+  expect(opens[1]!.focus).toBeUndefined()
+
+  // A terminal attaching: the next unasked open is tried again, and /wv may take the keys there.
+  await $.session.attach({ surface: 'terminal', clientId: 'terminal:default' })
+  await $.agent.spawn({ ...SPAWN, tool_use_id: 'tu-9' })
+  expect(opens).toHaveLength(3)
+  await $.command.run(WV)
+  expect(opens[3]!.focus).toBe(true)
+})
+
+test('with pane = manual the rack opens only with /wv', { options: { pane: 'manual' } }, async ($, on) => {
+  world(on, { open: false })
+  let opens = 0
+  on('ui.open', () => {
+    opens += 1
+
+    return { value: { isPlaced: true } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn(SPAWN)
+  expect(opens).toBe(0)
+  const out = await $.command.run(WV)
+  expect(opens).toBe(1)
+  expect(out.text).toMatch(/pane = manual/)
 })

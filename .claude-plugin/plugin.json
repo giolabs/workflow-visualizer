@@ -55,6 +55,16 @@
       ],
       "default": "auto"
     },
+    "pane": {
+      "type": "string",
+      "title": "Rack pane opening",
+      "description": "'auto' opens the rack pane by itself when a workflow or an agent starts (where the surface places panes); 'manual' opens it only with /wv.",
+      "options": [
+        "auto",
+        "manual"
+      ],
+      "default": "auto"
+    },
     "jiraProject": {
       "type": "string",
       "title": "Jira project key",
