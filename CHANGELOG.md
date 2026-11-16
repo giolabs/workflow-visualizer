@@ -6,6 +6,8 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+## [0.4.0-beta.9] - 2026-11-16
+
 ### Fixed
 - Chat sessions without a terminal stopped with "the plugin is waiting for input in a terminal
   pane": the rack opened its pane by itself at every spawn, focused from `/wv`, and drew a terminal
@@ -16,7 +18,6 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ### Added
 - Setting `pane` (`auto` | `manual`): `manual` opens the rack only with `/wv`.
-
 
 ## [0.4.0-beta.8] - 2026-11-14
 
