@@ -6,6 +6,18 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Added
+- The rack as text, for clients that attach no drawing surface (a chat client such as Orca in chat
+  mode, where `$.session.surfaces()` is empty and a pane has nowhere to seat): `/wv rack` prints the
+  orchestrator and every agent in box-drawing inside a code block, `/wv` answers with it where no
+  surface draws, and a `rack` tool lets the model paste it when a workflow or its agents finish
+  (the system prompt asks for that only in such sessions).
+
+### Changed
+- The pane's "widen the terminal" note is replaced, where no surface draws, by one that says the
+  client draws no panes and points to `/wv rack`.
+
+
 ## [0.4.0-beta.9] - 2026-11-16
 
 ### Fixed

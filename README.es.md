@@ -60,7 +60,8 @@ Para correrlo desde un checkout: `claude --plugin-dir /ruta/a/workflow-visualize
 
 | Comando | Qué hace |
 | --- | --- |
-| `/wv` | Abre el pane del rack con foco (funcionan flechas, `Enter` y `?`). |
+| `/wv` | Abre el pane del rack con foco (funcionan flechas, `Enter` y `?`). Donde el cliente no dibuja panes (un chat), imprime el rack como texto. |
+| `/wv rack` | Imprime el rack como texto: el orquestador y cada agente, en un bloque de código. |
 | `/wv loop <tickets>` | Corre la orquestación `loop-mode` sobre esos tickets con el idioma y el modo del plugin. |
 | `/wv <pedido en palabras>` | Lanza el workflow `wv-ask`: artefactos del repo + Jira + git investigados en paralelo y una respuesta sintetizada, todo visible en el rack (p. ej. `/wv tickets del ADR-050 en backlog`). |
 | `/wv report [today\|7d\|30d\|all] [save]` | Reporte de productividad en markdown; `save` lo escribe en `.workflow-visualizer/reports/`. |
