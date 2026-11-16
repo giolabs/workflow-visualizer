@@ -46,6 +46,7 @@ una sola vez las opciones del plugin:
 | Conversation language | `en`, `es` | Idioma del pane, los toasts, los reportes y los prompts de orquestación. El código y la documentación quedan en inglés. |
 | Default decision mode | `hitl`, `autonomous` | `hitl` pausa los runs del loop antes de cualquier push, PR o merge y pregunta; `autonomous` avanza y reporta cada decisión. |
 | Model choice for subagents | `auto`, `off` | `auto` elige el modelo de un subagente según su tarea cuando nadie lo fijó (ver [El razonamiento del orquestador](#el-razonamiento-del-orquestador)); `off` no lo toca nunca. |
+| Live rack in the browser | `auto`, `manual`, `off` | `auto` levanta un server local (`127.0.0.1`, requiere `node`) con el rack en vivo y abre el navegador cuando arrancan agentes en una sesión que no dibuja panes, como un cliente de chat; `manual` solo con `/wv web`; `off` nunca. |
 | Rack pane opening | `auto`, `manual` | `auto` abre el rack solo cuando arranca un workflow o un agente, donde la superficie ubica panes; `manual` lo abre solo con `/wv`. |
 | Jira project key | p. ej. `MH` | Opcional. Habilita las métricas de sprint del sprint abierto del proyecto. |
 | Jira story points field | `customfield_10016` | Opcional. El campo custom que guarda los story points en tu Jira. |
@@ -62,6 +63,7 @@ Para correrlo desde un checkout: `claude --plugin-dir /ruta/a/workflow-visualize
 | --- | --- |
 | `/wv` | Abre el pane del rack con foco (funcionan flechas, `Enter` y `?`). Donde el cliente no dibuja panes (un chat), imprime el rack como texto. |
 | `/wv rack` | Imprime el rack como texto: el orquestador y cada agente, en un bloque de código. |
+| `/wv web [stop]` | El rack en vivo en el navegador: un server local en `127.0.0.1` que la página sigue segundo a segundo (requiere `node`). `stop` lo cierra. |
 | `/wv loop <tickets>` | Corre la orquestación `loop-mode` sobre esos tickets con el idioma y el modo del plugin. |
 | `/wv <pedido en palabras>` | Lanza el workflow `wv-ask`: artefactos del repo + Jira + git investigados en paralelo y una respuesta sintetizada, todo visible en el rack (p. ej. `/wv tickets del ADR-050 en backlog`). |
 | `/wv report [today\|7d\|30d\|all] [save]` | Reporte de productividad en markdown; `save` lo escribe en `.workflow-visualizer/reports/`. |

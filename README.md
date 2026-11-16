@@ -46,6 +46,7 @@ once for the plugin's settings:
 | Conversation language | `en`, `es` | Language of the pane, toasts, reports and the orchestration prompts. Code and docs stay in English. |
 | Default decision mode | `hitl`, `autonomous` | `hitl` pauses loop runs before any push, PR or merge and asks; `autonomous` proceeds and reports every decision. |
 | Model choice for subagents | `auto`, `off` | `auto` picks a subagent's model from its task when nobody named one (see [The orchestrator's reasoning](#the-orchestrators-reasoning)); `off` never touches it. |
+| Live rack in the browser | `auto`, `manual`, `off` | `auto` starts a local server (`127.0.0.1`, needs `node`) with the live rack and opens the browser when agents start in a session that draws no panes, such as a chat client; `manual` only with `/wv web`; `off` never. |
 | Rack pane opening | `auto`, `manual` | `auto` opens the rack by itself when a workflow or an agent starts, where the surface places panes; `manual` opens it only with `/wv`. |
 | Jira project key | e.g. `MH` | Optional. Enables sprint metrics from the project's open sprint. |
 | Jira story points field | `customfield_10016` | Optional. The custom field holding story points in your Jira. |
@@ -62,6 +63,7 @@ To run it from a checkout instead: `claude --plugin-dir /path/to/workflow-visual
 | --- | --- |
 | `/wv` | Opens the rack pane, focused (arrows, `Enter`, `?` work). Where the client draws no panes (a chat), prints the rack as text instead. |
 | `/wv rack` | Prints the rack as text: the orchestrator and every agent, in a code block. |
+| `/wv web [stop]` | The live rack in the browser: a local server on `127.0.0.1` the page follows second by second (needs `node`). `stop` closes it. |
 | `/wv loop <tickets>` | Runs the bundled `loop-mode` orchestration over those tickets with the plugin's language and decision mode. |
 | `/wv <request in plain words>` | Launches the `wv-ask` workflow: repo artifacts + Jira + git researched in parallel, then a synthesized answer, all visible in the rack (e.g. `/wv tickets of ADR-050 in backlog`). |
 | `/wv report [today\|7d\|30d\|all] [save]` | Productivity report in markdown; `save` writes it under `.workflow-visualizer/reports/`. |

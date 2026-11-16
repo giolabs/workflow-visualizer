@@ -341,3 +341,94 @@ test('the rack tool hands the model the same text, and the system prompt asks fo
   expect(String(called.result)).toMatch(/jira researcher/)
   expect(String(called.result)).toMatch(/^```text/)
 })
+
+test('without a surface the live rack server starts by itself at the first agent, is fed every second, and /wv web stop ends it', async ($, on) => {
+  const { clock } = world(on, { open: false })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no-surface: nothing draws' } }))
+  const spawned: string[][] = []
+  const posted: { url: string; method?: string; token?: string; body: string }[] = []
+  const ran: string[][] = []
+  let release: () => void = () => undefined
+  const held = new Promise<void>(r => {
+    release = r
+  })
+  on('process.spawn', async function* (_, e) {
+    spawned.push([...e.argv])
+    yield { stream: 'stdout', text: 'listening http://127.0.0.1:4321 token=abcdef0123456789abcdef01\n' }
+    await held
+
+    return { value: { code: 0, signal: null } }
+  })
+  on('http.fetch', (_, e) => {
+    const headers = e.init?.headers ?? {}
+    posted.push({ url: e.url, method: e.init?.method, token: headers['x-wv-token'], body: typeof e.init?.body === 'string' ? e.init.body : '' })
+    if (e.url.endsWith('/quit')) release()
+
+    return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+  })
+  on('process.run', (_, e) => {
+    ran.push([...e.argv])
+
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.session.start({ cwd: '/', surface: null, isInteractive: true })
+
+  await $.agent.spawn({ ...SPAWN, description: 'repo researcher' })
+  await clock.settle()
+  expect(spawned).toHaveLength(1)
+  expect(spawned[0]![0]).toBe('node')
+  expect(spawned[0]![1]).toMatch(/\/web\/server\.mjs$/)
+  expect(ran[0]).toEqual(['open', 'http://127.0.0.1:4321'])
+  const first = posted.find(p => p.url === 'http://127.0.0.1:4321/state')
+  expect(first?.method).toBe('POST')
+  expect(first?.token).toBe('abcdef0123456789abcdef01')
+  expect(first?.body).toMatch(/repo researcher/)
+  expect(first?.body).toMatch(/"labels"/)
+
+  // The 1 s clock keeps the page fed while the server runs.
+  const before = posted.length
+  await clock.advance(2000)
+  expect(posted.length).toBeGreaterThan(before)
+
+  // /wv says where it is; a second agent starts no second server.
+  const open = await $.command.run(WV)
+  expect(open.text).toMatch(/http:\/\/127\.0\.0\.1:4321/)
+  await $.agent.spawn({ ...SPAWN, tool_use_id: 'tu-2', description: 'git researcher' })
+  expect(spawned).toHaveLength(1)
+
+  const stopped = await $.command.run({ ...WV, args: 'web stop' })
+  expect(stopped.text).toMatch(/closed|cerrado/)
+  expect(posted.some(p => p.url === 'http://127.0.0.1:4321/quit')).toBe(true)
+  await clock.settle()
+  expect((await $.command.run({ ...WV, args: 'web stop' })).text).toMatch(/not running|no está corriendo/)
+})
+
+test('with web = manual nothing starts by itself; /wv web starts it', { options: { web: 'manual' } }, async ($, on) => {
+  world(on, { open: false })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no-surface: nothing draws' } }))
+  let spawns = 0
+  let release: () => void = () => undefined
+  const held = new Promise<void>(r => {
+    release = r
+  })
+  on('process.spawn', async function* () {
+    spawns += 1
+    yield { stream: 'stdout', text: 'listening http://127.0.0.1:5555 token=0123456789abcdef01234567\n' }
+    await held
+
+    return { value: { code: 0, signal: null } }
+  })
+  on('http.fetch', (_, e) => {
+    if (e.url.endsWith('/quit')) release()
+
+    return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
+  })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: true })
+  await $.agent.spawn(SPAWN)
+  expect(spawns).toBe(0)
+  const out = await $.command.run({ ...WV, args: 'web' })
+  expect(spawns).toBe(1)
+  expect(out.text).toMatch(/127\.0\.0\.1:5555/)
+  await $.command.run({ ...WV, args: 'web stop' })
+})

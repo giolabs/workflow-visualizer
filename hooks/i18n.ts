@@ -84,6 +84,11 @@ export type Strings = {
   rackHalted: (reason: string) => string
   paneManual: string
   paneNoSurface: string
+  webLive: (url: string) => string
+  webStopped: string
+  webOff: string
+  webFailed: (reason: string) => string
+  webNotRunning: string
   keysHint: string
   turn: string
   roleLabel: string
@@ -197,6 +202,11 @@ const en: Strings = {
   rackHalted: reason => `⚠ rack view off after repeated failures (${reason}); plain rows until the plugin reloads`,
   paneManual: 'The rack pane opens only with /wv (setting pane = manual).',
   paneNoSurface: 'This client draws no panes, so the rack comes as text: /wv rack prints it any time, and it is pasted when a workflow ends.',
+  webLive: url => `Live rack in the browser: ${url} (/wv web stop closes it).`,
+  webStopped: 'Live rack closed.',
+  webOff: 'The live rack is off (setting web = off).',
+  webFailed: reason => `The live rack could not start (${reason}); node must be on the PATH.`,
+  webNotRunning: 'The live rack is not running; /wv web starts it.',
   keysHint: '←→↑↓ enter ?',
   turn: 'turn',
   roleLabel: 'Role: ',
@@ -307,6 +317,11 @@ const es: Strings = {
   rackHalted: reason => `⚠ vista rack apagada tras fallas repetidas (${reason}); filas simples hasta recargar el plugin`,
   paneManual: 'El pane del rack se abre solo con /wv (opción pane = manual).',
   paneNoSurface: 'Este cliente no dibuja panes, así que el rack va en texto: /wv rack lo imprime cuando quieras y se pega al terminar un workflow.',
+  webLive: url => `Rack en vivo en el navegador: ${url} (/wv web stop lo cierra).`,
+  webStopped: 'Rack en vivo cerrado.',
+  webOff: 'El rack en vivo está apagado (opción web = off).',
+  webFailed: reason => `No pudo arrancar el rack en vivo (${reason}); node tiene que estar en el PATH.`,
+  webNotRunning: 'El rack en vivo no está corriendo; /wv web lo arranca.',
   turn: 'turno',
   roleLabel: 'Función: ',
   roleText: 'lanza agentes y workflows, junta sus reportes y te responde',
