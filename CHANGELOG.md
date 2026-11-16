@@ -6,6 +6,13 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Security
+- The live rack server (`web/server.mjs`) refuses requests whose `Host` (or `Origin`) is not its own
+  address, and serves the state (`/state`, `/events`) only with the per-run token, which the browser
+  receives once in the URL the plugin opens and keeps as an `HttpOnly SameSite=Strict` cookie: a
+  web page could otherwise have read the agents' tasks through DNS rebinding.
+
+
 ## [0.4.0-beta.11] - 2026-11-16
 
 ### Added

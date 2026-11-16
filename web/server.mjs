@@ -3,6 +3,10 @@
 // line, `listening http://127.0.0.1:<port> token=<token>`, that the plugin reads. Writes need the
 // token; reads (the page, /state, /events) are open to the local machine. Exits on POST /quit, when
 // the parent process is gone, or with the plugin (the engine kills the child with its stream).
+//
+// Against DNS rebinding and other local processes: every request must name this server in its
+// Host (and Origin, when sent), and the state is read only with the token, handed to the browser
+// once in the URL the plugin opens (`/?t=<token>`) and kept as an HttpOnly SameSite=Strict cookie.
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -13,7 +17,24 @@ const dir = dirname(fileURLToPath(import.meta.url))
 const token = randomBytes(12).toString('hex')
 const BODY_MAX = 2 * 1024 * 1024
 let state = null
+let port = 0
 const clients = new Set()
+
+const hostOk = req => {
+  const host = req.headers.host ?? ''
+  if (![`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host)) return false
+  const origin = req.headers.origin
+  if (origin && origin !== `http://${host}`) return false
+
+  return true
+}
+
+const cookieToken = req =>
+  (req.headers.cookie ?? '')
+    .split(';')
+    .map(part => part.trim())
+    .filter(part => part.startsWith('wv='))
+    .map(part => part.slice(3))[0]
 
 const json = (res, status, value) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -41,12 +62,21 @@ const readBody = req =>
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   try {
+    if (!hostOk(req)) return json(res, 403, { error: 'host' })
+    if (req.method === 'GET' && url.pathname === '/' && url.searchParams.get('t') === token) {
+      res.writeHead(302, { location: '/', 'set-cookie': `wv=${token}; HttpOnly; SameSite=Strict; Path=/`, 'cache-control': 'no-store' })
+      res.end()
+
+      return
+    }
+    const canRead = cookieToken(req) === token || url.searchParams.get('t') === token
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       res.end(await readFile(join(dir, 'index.html')))
 
       return
     }
+    if (req.method === 'GET' && (url.pathname === '/state' || url.pathname === '/events') && !canRead) return json(res, 403, { error: 'token' })
     if (req.method === 'GET' && url.pathname === '/state') return json(res, 200, state ?? {})
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
@@ -84,7 +114,7 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(0, '127.0.0.1', () => {
-  const { port } = server.address()
+  port = server.address().port
   process.stdout.write(`listening http://127.0.0.1:${port} token=${token}\n`)
 })
 

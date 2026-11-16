@@ -20,7 +20,7 @@ import { usdOf } from './pricing'
 import { faulted, freshSlot, slotKey } from './rack-slot'
 import { fitProps, slim } from './rack-props'
 import { fenced, renderRackText } from './rack-text'
-import { openCommands, parseListening, webPayload } from './web'
+import { openCommands, parseListening, webLink, webPayload } from './web'
 import { STATIC, drawRack } from './rack-client'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
@@ -650,9 +650,9 @@ async function ensureWeb($: WebDollar & SnapshotDollar, t: Strings, language: La
   const started = await startWeb($)
   if (!started) return asked || webError ? t.webFailed(webError ?? 'timeout') : ''
   await pushWeb($, webPayload(await rackSnapshot($, t, language), t))
-  void openBrowser($, started.url)
+  void openBrowser($, webLink(started))
 
-  return t.webLive(started.url)
+  return t.webLive(webLink(started))
 }
 
 export const register: Register = (on, options) => {
@@ -724,7 +724,7 @@ export const register: Register = (on, options) => {
       `Loop runs default to ${autonomy === 'autonomous' ? 'autonomous mode' : 'human-in-the-loop mode'} ("/wv loop <tickets>"); the user can switch it per run.`,
       ...(modelPolicy === 'auto' ? ['When you spawn a subagent without naming a model, the plugin picks one from the task (research → haiku, implementation and tests → sonnet, review, architecture, UI and synthesis → opus) and shows the choice in the rack; name a model only when the task needs a specific one.'] : []),
       ...(e.surfaces.length === 0
-        ? [`This client attaches no drawing surface, so the rack pane cannot be shown here. Whenever a workflow or the agents you launched finish, and whenever the user asks about the rack or the agents, call the \`${RACK_TOOL}\` tool and paste its text verbatim inside a \`\`\`text block; never describe the rack from memory.${web ? ` The live rack is also open in the browser at ${web.url}; mention that URL once when agents start.` : ''}`]
+        ? [`This client attaches no drawing surface, so the rack pane cannot be shown here. Whenever a workflow or the agents you launched finish, and whenever the user asks about the rack or the agents, call the \`${RACK_TOOL}\` tool and paste its text verbatim inside a \`\`\`text block; never describe the rack from memory.${web ? ` The live rack is also open in the browser at ${webLink(web)}; mention that URL once when agents start.` : ''}`]
         : ['The Workflow Visualizer pane shows every agent live; keep status lines terse.']),
     ].join('\n')
 
