@@ -19,6 +19,7 @@ import { VERSION } from './version'
 import { usdOf } from './pricing'
 import { faulted, freshSlot, slotKey } from './rack-slot'
 import { fitProps, slim } from './rack-props'
+import { STATIC, drawRack } from './rack-client'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
 
@@ -47,6 +48,29 @@ const lastPhase = new Map<string, RackPhase>()
 
 // The rack Client's slot (rack-slot.ts). Module-local on purpose: a reload starts over.
 let slot = freshSlot()
+
+// Where the session draws, as session.start and session.attach say. The pane opens unasked (a
+// workflow or an agent starting) without the keyboard, and only once while no attached surface
+// places panes: a chat session without a terminal is not asked again at every spawn. The person's
+// own /wv opens it anywhere, focused where a terminal takes the keys.
+let surfaces: readonly string[] = []
+let paneWaiting = false
+
+type PaneDollar = { ui: { open: EngineInterface['ui']['open'] } }
+
+async function openPane($: PaneDollar, title: string, asked: boolean, auto: boolean): Promise<{ isPlaced: boolean; reason?: string }> {
+  if (!asked) {
+    if (!auto || paneWaiting) return { isPlaced: false, reason: auto ? 'waiting for a surface that places panes' : 'pane = manual' }
+    const seat = await $.ui.open({ id: PANE, title })
+    paneWaiting = !seat.isPlaced
+
+    return seat
+  }
+  const seat = await $.ui.open(surfaces.includes('terminal') ? { id: PANE, title, focus: true } : { id: PANE, title })
+  paneWaiting = !seat.isPlaced
+
+  return seat
+}
 
 function mascot(model: string): string {
   const m = (model ?? '').toLowerCase()
@@ -485,6 +509,7 @@ export const register: Register = (on, options) => {
   const language = asLanguage(options.language)
   const autonomy = options.autonomy === 'autonomous' ? 'autonomous' : 'hitl'
   const modelPolicy: ModelPolicy = options.modelPolicy === 'off' ? 'off' : 'auto'
+  const paneAuto = options.pane !== 'manual'
   const t = strings(language)
   const jira: JiraConfig = {
     server: typeof options.jiraServer === 'string' && options.jiraServer ? options.jiraServer : 'claude.ai Atlassian',
@@ -493,6 +518,8 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
+    surfaces = e.surface ? [e.surface] : []
+    paneWaiting = false
     launchTurn = (text, context, onRefused) => {
       $.clock.after(0, () => {
         // The long instructions (the whole wv-ask script among them) go in as a hidden user row the
@@ -546,8 +573,8 @@ export const register: Register = (on, options) => {
     const rest = restRaw
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
     if (sub === 'loop') {
-      const seat = await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
-      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason)}`
+      const seat = await openPane($, t.paneTitle, true, paneAuto)
+      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason ?? '')}`
       const prompt = loopPrompt(rest.join(' '), language, autonomy)
       if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, context: [prompt] }
       launchTurn(`${t.loopStarting(rest.join(' '))} (/wv loop)`, [prompt], t.launchRefused)
@@ -563,8 +590,8 @@ export const register: Register = (on, options) => {
       const repo = await $.session.repo().catch(() => null)
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
       // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
-      const seat = await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
-      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason)}`
+      const seat = await openPane($, t.paneTitle, true, paneAuto)
+      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason ?? '')}`
       // The script travels verbatim in the hidden context: a file under the repo could be swapped
       // or symlinked between the write and the Workflow run, and the engine would execute it.
       const prompt = launchPrompt(args, language, askArgs)
@@ -646,9 +673,9 @@ export const register: Register = (on, options) => {
 
       return { text: md, isTextDisplayOnly: true }
     }
-    await $.ui.open({ id: PANE, title: t.paneTitle, focus: true })
+    await openPane($, t.paneTitle, true, paneAuto)
 
-    return { text: t.paneOpened, isTextDisplayOnly: true }
+    return { text: paneAuto ? t.paneOpened : `${t.paneOpened} ${t.paneManual}`, isTextDisplayOnly: true }
     } catch (err) {
       // A malformed store record or an unexpected MCP shape degrades to a message, never a failed command.
       return { text: `workflow-visualizer: ${err instanceof Error ? err.message : String(err)}`, isTextDisplayOnly: true }
@@ -663,7 +690,7 @@ export const register: Register = (on, options) => {
       startedAt: now,
     }
     await update($, rack, s => ({ ...s, runs: capRuns([...s.runs, run]) }))
-    void $.ui.open({ id: PANE, title: t.paneTitle })
+    void openPane($, t.paneTitle, false, paneAuto)
     $.ui.toast(t.workflowEnters(run.name))
 
     return next(e)
@@ -678,7 +705,7 @@ export const register: Register = (on, options) => {
     if (started.deny !== undefined || started.agentId === undefined) return started
 
     const runKey = e.workflow ? e.tool_use_id : SOLO
-    void $.ui.open({ id: PANE, title: t.paneTitle })
+    void openPane($, t.paneTitle, false, paneAuto)
     const agent: RackAgent = {
       id: started.agentId,
       runKey,
@@ -744,7 +771,7 @@ export const register: Register = (on, options) => {
       // loaded): give it a tile from what the engine lists, so every running agent shows in the rack.
       const info = (await $.agent.list().catch(() => [])).find(a => a.id === id)
       const tile = adopted(id, now, model, info, e.text, t)
-      void $.ui.open({ id: PANE, title: t.paneTitle })
+      void openPane($, t.paneTitle, false, paneAuto)
       await update($, rack, s => {
         const runs = s.runs.some(r => r.key === SOLO) ? s.runs : [...s.runs, { key: SOLO, name: t.soloRun, startedAt: now }]
 
@@ -921,6 +948,13 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  on('session.attach', async ($, e, next) => {
+    if (!surfaces.includes(e.surface)) surfaces = [...surfaces, e.surface]
+    paneWaiting = false
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('ui.fault', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     const before = slot
     slot = faulted(slot, e.element, await $.clock.now(), e.reason)
@@ -976,11 +1010,15 @@ export const register: Register = (on, options) => {
     }
     const rows = Math.max(8, e.props.scroll.bodyRows)
 
-    if ((e.surface === 'terminal' || e.surface === 'desktop') && slot.halted === null) {
+    // Texts are already clipped (slim); a long loop can still pile up more agents than the engine's
+    // 100k-character bound on props takes, so the oldest finished ones leave the rack first.
+    const props = fitProps({ now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null })
+
+    // The terminal runs the rack as a Client: its own frame clock, keys and pointer. Every other
+    // surface (the desktop app, VS Code, the phone, a chat without a terminal) gets the same tree
+    // drawn still by this module, which asks nothing of the keyboard.
+    if (e.surface === 'terminal' && slot.halted === null) {
       const { Box, Client } = $.ui.resolve(e)
-      // Texts are already clipped (slim); a long loop can still pile up more agents than the engine's
-      // 100k-character bound on props takes, so the oldest finished ones leave the rack first.
-      const props = fitProps({ now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null })
 
       return (
         <Box flexDirection="column">
@@ -993,25 +1031,8 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column">
-        <Text bold color="claude">
-          🏟 {t.paneTitle.toUpperCase()}
-        </Text>
         {slot.halted !== null && <Text color="warning">{t.rackHalted(slot.halted)}</Text>}
-        <Text>
-          🎛 {main.description} · {main.doing} · {fmtTok(main.input + main.output + main.cacheRead + main.cacheWrite)} tok
-        </Text>
-        {agents.length === 0 && <Text dimColor>{t.emptyTitle}</Text>}
-        {agents.slice(-Math.max(1, rows - 3)).map(a => {
-          const live = a.status === 'running' || a.status === 'spawning'
-          const tot = a.input + a.output + a.cacheRead + a.cacheWrite
-
-          return (
-            <Text dimColor={!live}>
-              {live ? '●' : a.status === 'done' ? '✔' : '✖'} {mascot(a.model)} {a.description} · {a.doing} ·{' '}
-              {fmtTok(tot)} tok · {fmtDur((a.endedAt ?? now) - a.startedAt)}
-            </Text>
-          )
-        })}
+        {drawRack({ Box, Text }, props, STATIC, e.props.bodyColumns, rows, false)}
       </Box>
     )
   })

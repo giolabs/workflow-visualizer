@@ -6,6 +6,18 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Fixed
+- Chat sessions without a terminal stopped with "the plugin is waiting for input in a terminal
+  pane": the rack opened its pane by itself at every spawn, focused from `/wv`, and drew a terminal
+  `Client` that listens to the keyboard. The rack now draws on every surface: as the interactive
+  Client on the terminal, and as the same tree drawn still (no keys, no animation) on the desktop
+  app, VS Code, the phone and chat sessions. An unasked open never takes the keyboard and is tried
+  once until a surface that places panes attaches; `/wv` opens it anywhere.
+
+### Added
+- Setting `pane` (`auto` | `manual`): `manual` opens the rack only with `/wv`.
+
+
 ## [0.4.0-beta.8] - 2026-11-14
 
 ### Fixed

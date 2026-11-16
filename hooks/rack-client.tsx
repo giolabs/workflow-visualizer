@@ -1,4 +1,4 @@
-import type { ClientModule, Color, RenderElement } from 'claude-code'
+import type { ClientElements, ClientModule, Color, RenderElement } from 'claude-code'
 
 import { strings } from './i18n'
 import type { Language, Strings } from './i18n'
@@ -224,65 +224,24 @@ function firstRowOf(selectedAgent: number, gridCols: number, gridRowsVisible: nu
   return Math.max(0, Math.min(selRow - gridRowsVisible + 1, totalRows - gridRowsVisible))
 }
 
-const Rack: ClientModule<RackProps, Local> = (props, surface) => {
-  const { Box, Text } = surface.elements
+/** The rack's local state as a surface without a keyboard draws it: nothing selected, no detail, no help, still. */
+export const STATIC: Local = { frame: 0, selected: -1, detail: false, help: false }
+
+/**
+ * The rack as one tree: the header, the orchestrator, the tiles, the detail and the help.
+ * The Client draws it on the terminal with its own state and keys; a hooks module draws it still
+ * (`STATIC`, `interactive` false) on the surfaces that run no Client module.
+ */
+export function drawRack(el: Pick<ClientElements, 'Box' | 'Text'>, props: RackProps, local: Local, width: number, height: number, interactive: boolean): RenderElement {
+  const { Box, Text } = el
   const t = strings(props.language)
-  const cols = Math.max(30, surface.columns)
-  const rows = Math.max(8, surface.rows)
+  const cols = Math.max(30, width)
+  const rows = Math.max(8, height)
   const agents = [...props.agents].sort(
     (a, b) => a.runKey.localeCompare(b.runKey) || a.index - b.index || a.startedAt - b.startedAt,
   )
-  view.agents = agents
-  view.columns = cols
-  view.rows = rows
   const gridCols = Math.max(1, Math.floor(cols / MIN_TILE_W))
   const tileW = Math.floor(cols / gridCols)
-
-  // Selection index 0 is the orchestrator; agents follow at 1..n.
-  if (surface.state === undefined) {
-    surface.setState(INITIAL)
-    surface.every(160, () => {
-      const s = surface.state ?? INITIAL
-      surface.setState({ ...s, frame: s.frame + 1 })
-    })
-    surface.onKey(e => {
-      const s = surface.state ?? INITIAL
-      const count = view.agents.length + 1
-      const gc = Math.max(1, Math.floor(view.columns / MIN_TILE_W))
-      const cur = Math.min(s.selected, count - 1)
-      const go = (idx: number) => surface.setState({ ...s, selected: Math.max(0, Math.min(count - 1, idx)) })
-      if (e.key === 'left' || e.key === 'h') go(cur - 1)
-      else if (e.key === 'right' || e.key === 'l') go(cur + 1)
-      else if (e.key === 'up' || e.key === 'k') go(cur - gc < 1 ? 0 : cur - gc)
-      else if (e.key === 'down' || e.key === 'j') go(cur === 0 ? 1 : cur + gc)
-      else if (e.key === 'return' || e.key === ' ') surface.setState({ ...s, detail: !s.detail })
-      else if (e.key === '?') surface.setState({ ...s, help: !s.help })
-    })
-    surface.onPointer(e => {
-      if (e.type !== 'down' || e.y < HEADER_H) return
-      const s = surface.state ?? INITIAL
-      const count = view.agents.length + 1
-      const cur = Math.min(s.selected, count - 1)
-      const pick = (idx: number) => surface.setState({ ...s, selected: idx, detail: idx === cur ? !s.detail : true })
-      if (e.y < HEADER_H + ORCH_H) {
-        pick(0)
-
-        return
-      }
-      if (view.agents.length === 0) return
-      const gc = Math.max(1, Math.floor(view.columns / MIN_TILE_W))
-      const tw = Math.floor(view.columns / gc)
-      const visibleRows = rowsForGrid(s, view.rows)
-      const row = Math.floor((e.y - HEADER_H - ORCH_H) / TILE_H)
-      const col = Math.min(gc - 1, Math.floor(e.x / tw))
-      if (row >= visibleRows) return
-      const totalRows = Math.ceil(view.agents.length / gc)
-      const first = firstRowOf(cur - 1, gc, visibleRows, totalRows)
-      const idx = (row + first) * gc + col
-      if (idx < view.agents.length) pick(idx + 1)
-    })
-  }
-  const local = surface.state ?? INITIAL
   const selIdx = Math.min(local.selected, agents.length)
   const selected: ClientAgent | undefined = selIdx === 0 ? props.main : agents[selIdx - 1]
   const spin = SPIN[local.frame % SPIN.length] ?? '⠋'
@@ -304,7 +263,7 @@ const Rack: ClientModule<RackProps, Local> = (props, surface) => {
         <Text bold>{fmtTok(props.session.agentsTokens)}</Text>
         <Text dimColor> tok ≈ </Text>
         <Text bold color="success">{fmtUsd(props.session.agentsUsd)}</Text>
-        <Text dimColor>{props.session.unpriced > 0 ? t.unpriced(props.session.unpriced) : ''} · {t.keysHint} </Text>
+        <Text dimColor>{props.session.unpriced > 0 ? t.unpriced(props.session.unpriced) : ''}{interactive ? ` · ${t.keysHint}` : ''} </Text>
       </Text>
     </Box>
   )
@@ -542,6 +501,67 @@ const Rack: ClientModule<RackProps, Local> = (props, surface) => {
       {help}
     </Box>
   )
+}
+
+const Rack: ClientModule<RackProps, Local> = (props, surface) => {
+  const t = strings(props.language)
+  const cols = Math.max(30, surface.columns)
+  const rows = Math.max(8, surface.rows)
+  const agents = [...props.agents].sort(
+    (a, b) => a.runKey.localeCompare(b.runKey) || a.index - b.index || a.startedAt - b.startedAt,
+  )
+  view.agents = agents
+  view.columns = cols
+  view.rows = rows
+  const gridCols = Math.max(1, Math.floor(cols / MIN_TILE_W))
+  const tileW = Math.floor(cols / gridCols)
+
+  // Selection index 0 is the orchestrator; agents follow at 1..n.
+  if (surface.state === undefined) {
+    surface.setState(INITIAL)
+    surface.every(160, () => {
+      const s = surface.state ?? INITIAL
+      surface.setState({ ...s, frame: s.frame + 1 })
+    })
+    surface.onKey(e => {
+      const s = surface.state ?? INITIAL
+      const count = view.agents.length + 1
+      const gc = Math.max(1, Math.floor(view.columns / MIN_TILE_W))
+      const cur = Math.min(s.selected, count - 1)
+      const go = (idx: number) => surface.setState({ ...s, selected: Math.max(0, Math.min(count - 1, idx)) })
+      if (e.key === 'left' || e.key === 'h') go(cur - 1)
+      else if (e.key === 'right' || e.key === 'l') go(cur + 1)
+      else if (e.key === 'up' || e.key === 'k') go(cur - gc < 1 ? 0 : cur - gc)
+      else if (e.key === 'down' || e.key === 'j') go(cur === 0 ? 1 : cur + gc)
+      else if (e.key === 'return' || e.key === ' ') surface.setState({ ...s, detail: !s.detail })
+      else if (e.key === '?') surface.setState({ ...s, help: !s.help })
+    })
+    surface.onPointer(e => {
+      if (e.type !== 'down' || e.y < HEADER_H) return
+      const s = surface.state ?? INITIAL
+      const count = view.agents.length + 1
+      const cur = Math.min(s.selected, count - 1)
+      const pick = (idx: number) => surface.setState({ ...s, selected: idx, detail: idx === cur ? !s.detail : true })
+      if (e.y < HEADER_H + ORCH_H) {
+        pick(0)
+
+        return
+      }
+      if (view.agents.length === 0) return
+      const gc = Math.max(1, Math.floor(view.columns / MIN_TILE_W))
+      const tw = Math.floor(view.columns / gc)
+      const visibleRows = rowsForGrid(s, view.rows)
+      const row = Math.floor((e.y - HEADER_H - ORCH_H) / TILE_H)
+      const col = Math.min(gc - 1, Math.floor(e.x / tw))
+      if (row >= visibleRows) return
+      const totalRows = Math.ceil(view.agents.length / gc)
+      const first = firstRowOf(cur - 1, gc, visibleRows, totalRows)
+      const idx = (row + first) * gc + col
+      if (idx < view.agents.length) pick(idx + 1)
+    })
+  }
+
+  return drawRack(surface.elements, props, surface.state ?? INITIAL, cols, rows, true)
 }
 
 export default Rack

@@ -46,6 +46,7 @@ once for the plugin's settings:
 | Conversation language | `en`, `es` | Language of the pane, toasts, reports and the orchestration prompts. Code and docs stay in English. |
 | Default decision mode | `hitl`, `autonomous` | `hitl` pauses loop runs before any push, PR or merge and asks; `autonomous` proceeds and reports every decision. |
 | Model choice for subagents | `auto`, `off` | `auto` picks a subagent's model from its task when nobody named one (see [The orchestrator's reasoning](#the-orchestrators-reasoning)); `off` never touches it. |
+| Rack pane opening | `auto`, `manual` | `auto` opens the rack by itself when a workflow or an agent starts, where the surface places panes; `manual` opens it only with `/wv`. |
 | Jira project key | e.g. `MH` | Optional. Enables sprint metrics from the project's open sprint. |
 | Jira story points field | `customfield_10016` | Optional. The custom field holding story points in your Jira. |
 | Atlassian MCP server | `claude.ai Atlassian` | Optional. The MCP server name as `/mcp` lists it. |
