@@ -306,3 +306,38 @@ test('with pane = manual the rack opens only with /wv', { options: { pane: 'manu
   expect(opens).toBe(1)
   expect(out.text).toMatch(/pane = manual/)
 })
+
+test('/wv rack prints the rack as text, and /wv answers with it where no surface draws', async ($, on) => {
+  world(on, { open: false })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no-surface: no surface is attached ($.session.surfaces() is empty)' } }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, description: 'reader of the repo' })
+
+  const rack = await $.command.run({ ...WV, args: 'rack' })
+  expect(rack.text).toMatch(/^```text\n/)
+  expect(rack.text).toMatch(/ORCHESTRATOR/)
+  expect(rack.text).toMatch(/╔═+╗/)
+  expect(rack.text).toMatch(/╭─+╮/)
+  expect(rack.text).toMatch(/reader of the repo/)
+  expect(rack.text).toMatch(/1 servers/)
+
+  const open = await $.command.run(WV)
+  expect(open.text).toMatch(/draws no panes/)
+  expect(open.text).toMatch(/reader of the repo/)
+})
+
+test('the rack tool hands the model the same text, and the system prompt asks for it only without a surface', async ($, on) => {
+  world(on, { open: false })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no-surface: nothing draws' } }))
+  on('prompt.compose', () => ({ sections: [] }))
+  await $.session.start({ cwd: '/', surface: null, isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, description: 'jira researcher' })
+
+  const composed = await $.prompt.compose({ model: 'claude-fable-5-1', promptModel: 'claude-fable-5-1', surfaces: [], tools: [], outputStyle: { name: 'default', isKeepingCodingInstructions: true }, traits: [] })
+  const section = composed.sections.find(s => s.id === 'workflow-visualizer')
+  expect(section?.text).toMatch(/call the `rack` tool/)
+
+  const called = await $.tool.call({ tool: 'mcp__workflow-visualizer__rack' })
+  expect(String(called.result)).toMatch(/jira researcher/)
+  expect(String(called.result)).toMatch(/^```text/)
+})

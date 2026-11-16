@@ -60,7 +60,8 @@ To run it from a checkout instead: `claude --plugin-dir /path/to/workflow-visual
 
 | Command | What it does |
 | --- | --- |
-| `/wv` | Opens the rack pane, focused (arrows, `Enter`, `?` work). |
+| `/wv` | Opens the rack pane, focused (arrows, `Enter`, `?` work). Where the client draws no panes (a chat), prints the rack as text instead. |
+| `/wv rack` | Prints the rack as text: the orchestrator and every agent, in a code block. |
 | `/wv loop <tickets>` | Runs the bundled `loop-mode` orchestration over those tickets with the plugin's language and decision mode. |
 | `/wv <request in plain words>` | Launches the `wv-ask` workflow: repo artifacts + Jira + git researched in parallel, then a synthesized answer, all visible in the rack (e.g. `/wv tickets of ADR-050 in backlog`). |
 | `/wv report [today\|7d\|30d\|all] [save]` | Productivity report in markdown; `save` writes it under `.workflow-visualizer/reports/`. |

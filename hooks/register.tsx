@@ -19,6 +19,7 @@ import { VERSION } from './version'
 import { usdOf } from './pricing'
 import { faulted, freshSlot, slotKey } from './rack-slot'
 import { fitProps, slim } from './rack-props'
+import { fenced, renderRackText } from './rack-text'
 import { STATIC, drawRack } from './rack-client'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
@@ -57,6 +58,11 @@ let surfaces: readonly string[] = []
 let paneWaiting = false
 
 type PaneDollar = { ui: { open: EngineInterface['ui']['open'] } }
+
+const RACK_TOOL = 'rack'
+
+/** `$.ui.open`'s word for a session nothing draws (a -p run, the SDK, a chat client without a terminal). */
+const noSurface = (reason: string | undefined): boolean => (reason ?? '').startsWith('no-surface')
 
 async function openPane($: PaneDollar, title: string, asked: boolean, auto: boolean): Promise<{ isPlaced: boolean; reason?: string }> {
   if (!asked) {
@@ -255,7 +261,7 @@ function loopPrompt(args: string, language: Language, autonomy: string): string 
   ].join('\n')
 }
 
-const SUBCOMMANDS = ['loop', 'report', 'objectives', 'jira', 'help', 'config'] as const
+const SUBCOMMANDS = ['loop', 'report', 'objectives', 'jira', 'help', 'config', 'rack'] as const
 type Subcommand = (typeof SUBCOMMANDS)[number] | 'open' | 'ask' | 'unknown'
 
 /** Edit distance, for forgiving a typo in a subcommand (`objetives`, `cofig`). */
@@ -319,6 +325,7 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
       ? [
           `${t.versionLine(VERSION)} — subcomandos:`,
           '/wv            abre el pane del rack',
+          '/wv rack       imprime el rack como texto (para clientes sin pane, p. ej. un chat)',
           '/wv loop <tickets>   corre la orquestación loop-mode sobre esos tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   reporte de productividad (tokens, costo, por modelo/workflow/ticket, sprint)',
           '/wv jira       estado de la conexión con Jira y el sprint abierto del proyecto configurado',
@@ -330,6 +337,7 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
       : [
           `${t.versionLine(VERSION)} — subcommands:`,
           '/wv            open the rack pane',
+          '/wv rack       print the rack as text (for clients without panes, e.g. a chat)',
           '/wv loop <tickets>   run the loop-mode orchestration over those tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   productivity report (tokens, cost, by model/workflow/ticket, sprint)',
           '/wv jira       Jira connection status and the open sprint of the configured project',
@@ -505,6 +513,55 @@ async function allHistory($: StoreDollar & SessionDollar, state: RackState): Pro
   return [...stored.filter(isHistory), live]
 }
 
+// Everything the rack shows, from the session's state: the pane's Client props, the text rack and
+// the `rack` tool all read this one picture.
+type SnapshotDollar = Pick<EngineInterface, 'state' | 'clock' | 'session'>
+
+async function rackSnapshot($: SnapshotDollar, t: Strings, language: Language): Promise<RackProps> {
+  const state = await read($, rack)
+  const now = await $.clock.now()
+  const sessionModel = await $.session.model()
+  let contextPct: number | null = null
+  let costUsd: number | null = null
+  try {
+    const usage = await $.session.usage()
+    contextPct = usage.context.percent ?? null
+    costUsd = usage.cost?.usd ?? null
+  } catch {
+    // the host keeps no figures: the panel says so
+  }
+  const runName = (key: string) => state.runs.find(r => r.key === key)?.name ?? t.defaultRun
+  const catalog = state.objectives
+  // A finished agent stays a minute with its report and cost, then powers off the rack (brain.ts);
+  // /wv report keeps it.
+  const shown = state.agents.filter(a => !isPoweredOff(a, now))
+  const agents = shown.map(a => slim(toClient(a, runName(a.runKey), catalog)))
+  const main = slim(toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog))
+  // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
+  // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
+  const named = new Set<string>()
+  for (const a of [main, ...agents]) for (const m of a.objectives) named.add(m.id)
+  const objectives: Record<string, ClientObjective> = {}
+  for (const o of catalog?.items ?? []) if (named.has(o.id)) objectives[o.id] = { id: o.id, kind: o.kind, title: clip(o.title, 80), status: o.status, phase: o.phase }
+  const mentioned = new Set<string>()
+  for (const a of [main, ...agents]) for (const key of Object.keys(state.tickets)) if (a.description.includes(key) || a.task.includes(key)) mentioned.add(key)
+  const tickets: Record<string, RackTicket> = {}
+  for (const key of mentioned) tickets[key] = state.tickets[key]!
+  const session: SessionInfo = {
+    contextPct,
+    costUsd,
+    workflows: state.runs.filter(r => r.key !== SOLO).length,
+    agents: state.agents.length,
+    live: state.agents.filter(isLive).length,
+    agentsTokens: state.agents.reduce((n, a) => n + totalOf(a), 0),
+    agentsUsd: state.agents.reduce((n, a) => n + (usdOf(a) ?? 0), 0),
+    unpriced: state.agents.filter(a => usdOf(a) === null).length,
+    off: state.agents.length - shown.length,
+  }
+
+  return { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
+}
+
 export const register: Register = (on, options) => {
   const language = asLanguage(options.language)
   const autonomy = options.autonomy === 'autonomous' ? 'autonomous' : 'hitl'
@@ -530,6 +587,14 @@ export const register: Register = (on, options) => {
           .catch((err: unknown) => $.ui.toast(`${onRefused} ${err instanceof Error ? err.message : String(err)}`))
       })
     }
+    await $.tool
+      .register({
+        name: RACK_TOOL,
+        description: 'The Workflow Visualizer rack as text: the orchestrator and every agent of this session (status, what it is doing, tokens, cost). Call it when the user asks about the rack or the agents, or when a workflow or agents you launched finish, and paste the text verbatim in a ```text block.',
+        inputSchema: { type: 'object', properties: {} },
+        isDeferred: false,
+      })
+      .catch(() => undefined)
     await $.command.register({
       name: COMMAND,
       description: t.commandOpen,
@@ -559,10 +624,15 @@ export const register: Register = (on, options) => {
       'Whenever a decision is the user\'s to make, ask it with AskUserQuestion: 2-4 options, the recommended one first and labeled "(Recommended)", each with a one-line reason. Never leave a question in prose.',
       `Loop runs default to ${autonomy === 'autonomous' ? 'autonomous mode' : 'human-in-the-loop mode'} ("/wv loop <tickets>"); the user can switch it per run.`,
       ...(modelPolicy === 'auto' ? ['When you spawn a subagent without naming a model, the plugin picks one from the task (research → haiku, implementation and tests → sonnet, review, architecture, UI and synthesis → opus) and shows the choice in the rack; name a model only when the task needs a specific one.'] : []),
+      ...(e.surfaces.length === 0
+        ? [`This client attaches no drawing surface, so the rack pane cannot be shown here. Whenever a workflow or the agents you launched finish, and whenever the user asks about the rack or the agents, call the \`${RACK_TOOL}\` tool and paste its text verbatim inside a \`\`\`text block; never describe the rack from memory.`]
+        : ['The Workflow Visualizer pane shows every agent live; keep status lines terse.']),
     ].join('\n')
 
     return { sections: [...composed.sections, { id: 'workflow-visualizer', text, scope: 'session' }] }
   })
+
+  on('tool.call', { tool: `mcp__${PLUGIN}__${RACK_TOOL}` }, async $ => ({ result: fenced(renderRackText(await rackSnapshot($, t, language))) }))
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     try {
@@ -574,7 +644,7 @@ export const register: Register = (on, options) => {
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
     if (sub === 'loop') {
       const seat = await openPane($, t.paneTitle, true, paneAuto)
-      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason ?? '')}`
+      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? t.paneNoSurface : t.paneWaiting(seat.reason ?? '')}`
       const prompt = loopPrompt(rest.join(' '), language, autonomy)
       if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, context: [prompt] }
       launchTurn(`${t.loopStarting(rest.join(' '))} (/wv loop)`, [prompt], t.launchRefused)
@@ -582,6 +652,7 @@ export const register: Register = (on, options) => {
       return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, isTextDisplayOnly: true }
     }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
+    if (sub === 'rack') return { text: fenced(renderRackText(await rackSnapshot($, t, language), e.presentation?.columns ?? 84)), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
     if (sub === 'ask') {
       // The engine does not let a plugin call the Workflow tool itself (its agents run outside the
@@ -591,7 +662,7 @@ export const register: Register = (on, options) => {
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
       // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
       const seat = await openPane($, t.paneTitle, true, paneAuto)
-      const seatNote = seat.isPlaced ? '' : `\n${t.paneWaiting(seat.reason ?? '')}`
+      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? t.paneNoSurface : t.paneWaiting(seat.reason ?? '')}`
       // The script travels verbatim in the hidden context: a file under the repo could be swapped
       // or symlinked between the write and the Workflow run, and the engine would execute it.
       const prompt = launchPrompt(args, language, askArgs)
@@ -673,7 +744,8 @@ export const register: Register = (on, options) => {
 
       return { text: md, isTextDisplayOnly: true }
     }
-    await openPane($, t.paneTitle, true, paneAuto)
+    const seat = await openPane($, t.paneTitle, true, paneAuto)
+    if (!seat.isPlaced && noSurface(seat.reason)) return { text: `${t.paneNoSurface}\n\n${fenced(renderRackText(await rackSnapshot($, t, language), e.presentation?.columns ?? 84))}`, isTextDisplayOnly: true }
 
     return { text: paneAuto ? t.paneOpened : `${t.paneOpened} ${t.paneManual}`, isTextDisplayOnly: true }
     } catch (err) {
@@ -967,52 +1039,11 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const state = await read($, rack)
     await read($, tick)
-    const now = await $.clock.now()
-    const sessionModel = await $.session.model()
-    let contextPct: number | null = null
-    let costUsd: number | null = null
-    try {
-      const usage = await $.session.usage()
-      contextPct = usage.context.percent ?? null
-      costUsd = usage.cost?.usd ?? null
-    } catch {
-      // the host keeps no figures: the panel says so
-    }
-    const runName = (key: string) => state.runs.find(r => r.key === key)?.name ?? t.defaultRun
-    const catalog = state.objectives
-    // A finished agent stays a minute with its report and cost, then powers off the rack (brain.ts);
-    // /wv report keeps it.
-    const shown = state.agents.filter(a => !isPoweredOff(a, now))
-    const agents = shown.map(a => slim(toClient(a, runName(a.runKey), catalog)))
-    const main = slim(toClient(state.main ?? freshMain(now, sessionModel, t), t.sessionRun, catalog))
-    // Only what the tiles can show goes to the Client: the objectives and tickets some agent names
-    // (the whole catalog of a large repo serialises past the engine's 100k-character bound on props).
-    const named = new Set<string>()
-    for (const a of [main, ...agents]) for (const m of a.objectives) named.add(m.id)
-    const objectives: Record<string, ClientObjective> = {}
-    for (const o of catalog?.items ?? []) if (named.has(o.id)) objectives[o.id] = { id: o.id, kind: o.kind, title: clip(o.title, 80), status: o.status, phase: o.phase }
-    const mentioned = new Set<string>()
-    for (const a of [main, ...agents]) for (const key of Object.keys(state.tickets)) if (a.description.includes(key) || a.task.includes(key)) mentioned.add(key)
-    const tickets: Record<string, RackTicket> = {}
-    for (const key of mentioned) tickets[key] = state.tickets[key]!
-    const session: SessionInfo = {
-      contextPct,
-      costUsd,
-      workflows: state.runs.filter(r => r.key !== SOLO).length,
-      agents: state.agents.length,
-      live: state.agents.filter(isLive).length,
-      agentsTokens: state.agents.reduce((n, a) => n + totalOf(a), 0),
-      agentsUsd: state.agents.reduce((n, a) => n + (usdOf(a) ?? 0), 0),
-      unpriced: state.agents.filter(a => usdOf(a) === null).length,
-      off: state.agents.length - shown.length,
-    }
     const rows = Math.max(8, e.props.scroll.bodyRows)
-
     // Texts are already clipped (slim); a long loop can still pile up more agents than the engine's
     // 100k-character bound on props takes, so the oldest finished ones leave the rack first.
-    const props = fitProps({ now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null })
+    const props = fitProps(await rackSnapshot($, t, language))
 
     // The terminal runs the rack as a Client: its own frame clock, keys and pointer. Every other
     // surface (the desktop app, VS Code, the phone, a chat without a terminal) gets the same tree

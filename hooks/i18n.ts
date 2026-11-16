@@ -83,6 +83,7 @@ export type Strings = {
   unpriced: (n: number) => string
   rackHalted: (reason: string) => string
   paneManual: string
+  paneNoSurface: string
   keysHint: string
   turn: string
   roleLabel: string
@@ -195,6 +196,7 @@ const en: Strings = {
   unpriced: n => ` (+${n} unpriced)`,
   rackHalted: reason => `⚠ rack view off after repeated failures (${reason}); plain rows until the plugin reloads`,
   paneManual: 'The rack pane opens only with /wv (setting pane = manual).',
+  paneNoSurface: 'This client draws no panes, so the rack comes as text: /wv rack prints it any time, and it is pasted when a workflow ends.',
   keysHint: '←→↑↓ enter ?',
   turn: 'turn',
   roleLabel: 'Role: ',
@@ -304,6 +306,7 @@ const es: Strings = {
   unpriced: n => ` (+${n} sin precio)`,
   rackHalted: reason => `⚠ vista rack apagada tras fallas repetidas (${reason}); filas simples hasta recargar el plugin`,
   paneManual: 'El pane del rack se abre solo con /wv (opción pane = manual).',
+  paneNoSurface: 'Este cliente no dibuja panes, así que el rack va en texto: /wv rack lo imprime cuando quieras y se pega al terminar un workflow.',
   turn: 'turno',
   roleLabel: 'Función: ',
   roleText: 'lanza agentes y workflows, junta sus reportes y te responde',

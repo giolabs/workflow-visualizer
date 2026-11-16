@@ -98,7 +98,7 @@ const ORCH_H = 6
 const MIN_TILE_W = 30
 const HEADER_H = 1
 
-function mascot(model: string): string {
+export function mascot(model: string): string {
   const m = (model ?? '').toLowerCase()
   if (m.includes('haiku')) return '🐇'
   if (m.includes('sonnet')) return '🦊'
@@ -107,7 +107,7 @@ function mascot(model: string): string {
   return '🤖'
 }
 
-function shortModel(model: string): string {
+export function shortModel(model: string): string {
   const m = (model ?? '').toLowerCase()
   for (const name of ['haiku', 'sonnet', 'opus', 'fable']) if (m.includes(name)) return name
   return model.length > 10 ? model.slice(0, 10) : model
@@ -121,29 +121,29 @@ function rank(total: number, t: Strings): string {
   return t.ranks[4]
 }
 
-function fmtTok(n: number): string {
+export function fmtTok(n: number): string {
   if (n < 1_000) return String(n)
   if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(2)}M`
 }
 
-function fmtDur(ms: number): string {
+export function fmtDur(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 }
 
-function fmtUsd(n: number | null): string {
+export function fmtUsd(n: number | null): string {
   if (n === null) return '$?'
   if (n < 0.01) return `$${n.toFixed(4)}`
   if (n < 1) return `$${n.toFixed(3)}`
   return `$${n.toFixed(2)}`
 }
 
-function total(a: ClientAgent): number {
+export function total(a: ClientAgent): number {
   return a.input + a.output + a.cacheRead + a.cacheWrite
 }
 
-function isLive(a: ClientAgent): boolean {
+export function isLive(a: ClientAgent): boolean {
   return a.status === 'running' || a.status === 'spawning'
 }
 
@@ -200,7 +200,7 @@ export function spark(history: number[], width: number, frame: number, live: boo
   return bars.padStart(width, '▁')
 }
 
-function statusOf(a: ClientAgent, frame: number, t: Strings): { led: string; label: string; color: Color } {
+export function statusOf(a: ClientAgent, frame: number, t: Strings): { led: string; label: string; color: Color } {
   if (a.status === 'done') return { led: '●', label: t.leds.done, color: 'success' }
   if (a.status === 'failed') return { led: '●', label: t.leds.fail, color: 'error' }
   if (a.status === 'idle') return { led: '◐', label: t.leds.idle, color: 'subtle' }
