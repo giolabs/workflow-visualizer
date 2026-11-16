@@ -65,6 +65,17 @@
       ],
       "default": "auto"
     },
+    "web": {
+      "type": "string",
+      "title": "Live rack in the browser",
+      "description": "'auto' starts a local server (127.0.0.1, node) with the live rack and opens the browser when agents start in a session that draws no panes (a chat client); 'manual' only with /wv web; 'off' never.",
+      "options": [
+        "auto",
+        "manual",
+        "off"
+      ],
+      "default": "auto"
+    },
     "jiraProject": {
       "type": "string",
       "title": "Jira project key",

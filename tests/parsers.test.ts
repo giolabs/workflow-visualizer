@@ -9,6 +9,7 @@ import { priceOf, usdOf } from '../hooks/pricing'
 import { fit, spark, wrap } from '../hooks/rack-client'
 import { RACK_FAULTS_MAX, faulted, freshSlot, slotKey } from '../hooks/rack-slot'
 import { PROPS_BUDGET, fitProps, propsSize, slim } from '../hooks/rack-props'
+import { openCommands, parseListening } from '../hooks/web'
 import { base, clip, sanitize, workflowName } from '../hooks/text'
 import { cell, isTicketKey, table } from '../hooks/history'
 
@@ -304,4 +305,11 @@ test('rack props stay under the engine bound: texts are clipped and the oldest f
   const keptDone = fit.agents.filter(a => a.status === 'done').map(a => a.endedAt!)
   const leftDone = agents.filter(a => a.status === 'done' && !fit.agents.includes(a)).map(a => a.endedAt!)
   expect(Math.min(...keptDone)).toBeGreaterThan(Math.max(...leftDone))
+})
+
+test('the live rack server line is read for its URL and token, nothing else', () => {
+  expect(parseListening('listening http://127.0.0.1:59152 token=fa970821cba5580f03947b67\n')).toEqual({ url: 'http://127.0.0.1:59152', token: 'fa970821cba5580f03947b67' })
+  expect(parseListening('listening http://0.0.0.0:80 token=abc')).toBeNull()
+  expect(parseListening('node: command not found')).toBeNull()
+  expect(openCommands('http://127.0.0.1:1')[0]).toEqual(['open', 'http://127.0.0.1:1'])
 })

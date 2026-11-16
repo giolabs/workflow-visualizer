@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflow Visualizer</title>
+<style>
+  :root { --bg:#0f1117; --panel:#161a23; --line:#2a3040; --text:#e6e8ef; --dim:#8a92a6; --claude:#d97757; --ok:#3fb950; --warn:#d29922; --err:#f85149; --think:#58a6ff; --idle:#6e7681; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:16px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  header h1 { font-size:15px; margin:0; color:var(--claude); letter-spacing:.04em; }
+  header .sum { color:var(--dim); }
+  header .sum b { color:var(--text); }
+  .conn { font-size:12px; color:var(--dim); }
+  .conn.off { color:var(--err); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .orch { border-width:2px; margin-bottom:12px; }
+  .orch.sel, .tile.sel { border-color:var(--claude); }
+  .row { display:flex; justify-content:space-between; gap:12px; }
+  .dim { color:var(--dim); }
+  .led { font-weight:700; }
+  .led.run { color:var(--warn); } .led.think { color:var(--think); } .led.done { color:var(--ok); } .led.fail { color:var(--err); } .led.idle, .led.boot { color:var(--idle); }
+  .doing { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
+  .tile { cursor:pointer; min-height:118px; }
+  .tile:hover { border-color:#3b4356; }
+  .tile.off { opacity:.55; }
+  .title { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .spark { letter-spacing:.5px; }
+  .empty { color:var(--dim); border-style:dashed; }
+  #detail { margin-top:12px; border-color:var(--claude); display:none; }
+  #detail.on { display:block; }
+  #detail .k { color:var(--dim); display:inline-block; min-width:8ch; margin-right:.5ch; }
+  #detail .log { color:var(--text); }
+  #detail .log .at { color:var(--dim); }
+  .blink { animation: blink 1s steps(2, start) infinite; }
+  @keyframes blink { to { visibility: hidden; } }
+  footer { margin-top:14px; color:var(--dim); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="h-title">WORKFLOW VISUALIZER <span class="dim" id="h-rack"></span></h1>
+  <div class="sum" id="h-sum"></div>
+  <div class="conn" id="conn">…</div>
+</header>
+<section class="card orch" id="orch"></section>
+<section class="grid" id="grid"></section>
+<section class="card" id="detail"></section>
+<footer id="foot"></footer>
+<script>
+(() => {
+  const $ = id => document.getElementById(id)
+  const BARS = ['▁','▂','▃','▄','▅','▆','▇','█']
+  let data = null, selected = null, connected = false, frame = 0
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+  const tok = n => n < 1e3 ? String(n) : n < 1e6 ? (n/1e3).toFixed(1)+'k' : (n/1e6).toFixed(2)+'M'
+  const usd = n => n === null || n === undefined ? '$?' : n < 0.01 ? '$'+n.toFixed(4) : n < 1 ? '$'+n.toFixed(3) : '$'+n.toFixed(2)
+  const dur = ms => { const s = Math.max(0, Math.floor(ms/1000)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0') }
+  const total = a => a.input + a.output + a.cacheRead + a.cacheWrite
+  const live = a => a.status === 'running' || a.status === 'spawning'
+  const short = m => { const x = (m||'').toLowerCase(); for (const n of ['haiku','sonnet','opus','fable']) if (x.includes(n)) return n; return m.length > 10 ? m.slice(0,10) : m }
+  const spark = (h, w, l) => { if (!h.length) return l ? Array.from({length:w},(_,i)=>BARS[(i+frame)%4]).join('') : '▁'.repeat(w); const s = h.slice(-w); const max = Math.max(1, ...s); return s.map(v => BARS[Math.min(7, Math.floor(v/max*7))]).join('').padStart(w,'▁') }
+  const led = (a, L) => {
+    if (a.status === 'done') return ['done', L.leds.done]
+    if (a.status === 'failed') return ['fail', L.leds.fail]
+    if (a.status === 'idle') return ['idle', L.leds.idle]
+    if (a.status === 'spawning') return ['boot', L.leds.boot]
+    return [a.phase === 'thinking' ? 'think' : 'run', a.phase === 'thinking' ? L.leds.think : a.phase === 'writing' ? L.leds.write : L.leds.work]
+  }
+  const now = () => (data && data.props && data.props.now) ? data.props.now + (Date.now() - received) : Date.now()
+  let received = Date.now()
+
+  function render() {
+    if (!data || !data.props) { $('orch').innerHTML = '<span class="dim">waiting for the plugin…</span>'; return }
+    const p = data.props, L = data.labels, s = p.session, m = p.main
+    const agents = [...p.agents].sort((a,b) => a.runKey.localeCompare(b.runKey) || a.index - b.index || a.startedAt - b.startedAt)
+    document.title = L.paneTitle
+    $('h-title').firstChild.textContent = L.paneTitle.toUpperCase() + ' '
+    $('h-rack').textContent = `· ${L.rack} · ${agents.length} ${L.servers}` + (s.off > 0 ? ` · ${s.off} ${L.poweredOff}` : '')
+    $('h-sum').innerHTML = (s.live > 0 ? `<span class="blink">●</span> ${s.live} ${esc(L.online)} · ` : '') + `${esc(L.sumAgents)} <b>${tok(s.agentsTokens)}</b> tok ≈ <b style="color:var(--ok)">${usd(s.agentsUsd)}</b>` + (s.unpriced > 0 ? ` <span class="dim">(+${s.unpriced})</span>` : '')
+    const [mc, ml] = led(m, L)
+    const ctx = s.contextPct === null ? L.contextUnknown : `${L.context} ${Math.round(s.contextPct)}%`
+    $('orch').className = 'card orch' + (selected === 'main' ? ' sel' : '')
+    $('orch').onclick = () => { selected = selected === 'main' ? null : 'main'; render() }
+    $('orch').innerHTML = `
+      <div class="row"><div>🎛 <b>${esc(L.orchestratorName.toUpperCase())}</b> <span class="dim">${esc(short(m.model))} · ${esc(L.turn)} ${m.turns}</span></div>
+        <div class="led ${mc}">${mc === 'run' || mc === 'think' ? '<span class="blink">●</span>' : '●'} ${esc(ml)} ${dur((m.endedAt ?? now()) - m.startedAt)}</div></div>
+      <div class="dim doing">${esc(L.roleLabel)}<span style="color:var(--text)">${esc(L.roleText)}</span>${p.branch ? ` ⎇ ${esc(p.branch)}` : ''}</div>
+      <div class="doing">▸ ${esc(m.doing)}</div>
+      <div class="dim">${s.workflows} ${esc(L.workflows)} · ${s.agents} ${esc(L.agents)} · ${s.live} ${esc(L.online)} · ${esc(ctx)}${s.costUsd !== null ? ` · ${esc(L.sessionReal)} ${usd(s.costUsd)}` : ''} · <span class="spark led ${mc}">${spark(m.history, 8, m.status === 'running')}</span> ${tok(total(m))} tok ≈ ${usd(m.usd)}</div>`
+    if (agents.length === 0) {
+      $('grid').innerHTML = `<div class="card empty">${esc(L.emptyTitle)}</div>`
+    } else {
+      $('grid').innerHTML = agents.map(a => {
+        const [c, l] = led(a, L)
+        return `<div class="card tile${selected === a.id ? ' sel' : ''}${live(a) ? '' : ' off'}" data-id="${esc(a.id)}">
+          <div class="row"><div class="title">${esc(a.description)}</div><div class="dim">${esc(short(a.model))}</div></div>
+          <div><span class="led ${c}">${live(a) ? '<span class="blink">●</span>' : '●'} ${esc(l)}</span> ${dur((a.endedAt ?? now()) - a.startedAt)} <span class="dim">· ${esc(L.step)} ${a.steps} · ${a.tools} ${esc(L.tools)}</span></div>
+          <div class="doing">▸ ${esc(a.doing)}</div>
+          <div><span class="spark led ${c}">${spark(a.history, 12, live(a))}</span> <b>${tok(total(a))}</b> <span class="dim">tok</span> <span style="color:var(--ok)">${usd(a.usd)}</span></div>
+        </div>`
+      }).join('')
+      for (const el of $('grid').querySelectorAll('.tile')) el.onclick = () => { selected = selected === el.dataset.id ? null : el.dataset.id; render() }
+    }
+    const a = selected === 'main' ? m : agents.find(x => x.id === selected)
+    $('detail').className = 'card' + (a ? ' on' : '')
+    if (a) {
+      const isMain = a === m
+      const [c, l] = led(a, L)
+      const tickets = Array.from(new Set([...(a.description + ' ' + a.task).matchAll(/\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b/g)].map(h => h[0])))
+      $('detail').innerHTML = `
+        <div class="row"><div>${isMain ? '🎛' : ''} <b>${esc(a.description)}</b> <span class="dim">${esc(short(a.model))} · ${esc(a.type)} · ${esc(a.runName)}</span></div><div class="led ${c}">● ${esc(l)} ${dur((a.endedAt ?? now()) - a.startedAt)}</div></div>
+        <div><span style="color:var(--think)">█</span> ${esc(L.cache)} ${tok(a.cacheRead)} <span style="color:var(--warn)">█</span> ${esc(L.input)} ${tok(a.input)} <span style="color:var(--ok)">█</span> ${esc(L.output)} ${tok(a.output)} <span class="dim">= ${tok(total(a))} tok ≈ ${usd(a.usd)} · ${a.steps} ${esc(L.steps)} · ${a.tools} ${esc(L.tools)}${isMain ? ` · ${a.turns} ${esc(L.turns)}` : ''}</span></div>
+        <div><span class="k">${esc(isMain ? L.roleLabel : L.taskLabel)}</span>${esc(a.task)}</div>
+        <div><span class="k">${esc(L.nowLabel)}</span>${esc(a.doing)}</div>
+        ${a.chosen ? `<div><span class="k">${esc(L.chosenLabel)}</span>${esc(a.model)} · ${esc((L.modelReason || {})[a.chosen.reason] || a.chosen.reason)}</div>` : ''}
+        ${a.objectives.slice(0, 4).map(o => { const ob = p.objectives[o.id]; return `<div><span class="k">${esc(L.objectiveLabel)}</span><b>${esc(o.id)}</b> <span class="dim">${esc(ob ? ob.kind : '')}</span> ${ob ? `${esc(ob.status)} <span class="dim">· ${esc(ob.title)}</span>` : ''}</div>` }).join('')}
+        ${tickets.slice(0, 4).map(k => { const tk = p.tickets[k]; return `<div><span class="k">${esc(L.ticketLabel)}</span><b>${esc(k)}</b> ${tk ? `${esc(tk.status)}${tk.points !== null ? ` · ${tk.points} pts` : ''} <span class="dim">· ${esc(tk.summary)}</span>` : `<span class="dim">${esc(L.ticketUnknown)}</span>`}</div>` }).join('')}
+        <div class="dim">${esc(L.lastActions)}</div>
+        ${a.log.map(x => `<div class="log"><span class="at">  ${dur(x.at - a.startedAt)} </span>${esc(x.text)}</div>`).join('')}
+        ${a.answer ? `<div><span class="k">${esc(isMain ? L.saidLabel : L.reportLabel)}</span>${esc(a.answer)}</div>` : ''}`
+    }
+    $('foot').textContent = `${L.help1}  ${L.help2}`
+  }
+
+  function connect() {
+    const es = new EventSource('/events')
+    es.onopen = () => { connected = true; $('conn').textContent = 'live'; $('conn').className = 'conn' }
+    es.onmessage = ev => { try { const next = JSON.parse(ev.data); if (next && next.props) { data = next; received = Date.now(); render() } } catch {} }
+    es.onerror = () => { connected = false; $('conn').textContent = 'reconnecting…'; $('conn').className = 'conn off'; es.close(); setTimeout(connect, 2000) }
+  }
+  fetch('/state').then(r => r.json()).then(s => { if (s && s.props) { data = s; received = Date.now() } render() }).catch(render)
+  connect()
+  setInterval(() => { frame++; if (data) render() }, 500)
+})()
+</script>
+</body>
+</html>

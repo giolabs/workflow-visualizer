@@ -6,6 +6,16 @@ Pre-releases (`-beta.N`, `-rc.N`) are for trying a version before it is declared
 
 ## [Unreleased]
 
+### Added
+- The live rack in the browser, for clients that attach no drawing surface (a chat client such as
+  Orca in chat mode): `/wv web` starts a local server (`web/server.mjs`, `127.0.0.1`, a free port,
+  needs `node`) and opens `web/index.html`, the same rack as the pane (orchestrator, tiles, detail
+  on click, sparklines, both languages) redrawn as the plugin pushes the state every second over
+  SSE. In `auto` mode it starts by itself when agents start in such a session and the launch note
+  carries the URL; `/wv web stop` closes it; it dies with the session. Setting `web`
+  (`auto` | `manual` | `off`).
+
+
 ## [0.4.0-beta.10] - 2026-11-16
 
 ### Added

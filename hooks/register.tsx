@@ -20,6 +20,7 @@ import { usdOf } from './pricing'
 import { faulted, freshSlot, slotKey } from './rack-slot'
 import { fitProps, slim } from './rack-props'
 import { fenced, renderRackText } from './rack-text'
+import { openCommands, parseListening, webPayload } from './web'
 import { STATIC, drawRack } from './rack-client'
 import type { ClientAgent, ClientObjective, RackProps, SessionInfo } from './rack-client'
 import { base, clip, str, workflowName } from './text'
@@ -60,6 +61,80 @@ let paneWaiting = false
 type PaneDollar = { ui: { open: EngineInterface['ui']['open'] } }
 
 const RACK_TOOL = 'rack'
+
+// The live rack in a browser (web/server.mjs), for sessions nothing draws. One child for the
+// session's life, started on demand; the page follows POST /state. Module-local on purpose.
+type WebMode = 'auto' | 'manual' | 'off'
+type WebDollar = Pick<EngineInterface, 'process' | 'http' | 'plugin' | 'clock'>
+type Web = { url: string; token: string }
+let web: Web | null = null
+let webStarting: Promise<Web | null> | null = null
+let webError: string | null = null
+let webOpened = false
+
+const WEB_READY_MS = 8000
+
+async function startWeb($: WebDollar): Promise<Web | null> {
+  if (web) return web
+  if (webStarting) return webStarting
+  webStarting = (async () => {
+    let settle: (w: Web | null) => void = () => undefined
+    const ready = new Promise<Web | null>(r => {
+      settle = r
+    })
+    $.clock.after(WEB_READY_MS, () => settle(null))
+    const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/web/server.mjs`] })
+    void (async () => {
+      try {
+        for await (const piece of child) {
+          if (web === null && 'text' in piece) {
+            const seen = parseListening(piece.text)
+            if (seen) {
+              web = seen
+              webError = null
+              settle(seen)
+            }
+          }
+        }
+      } catch (err) {
+        webError = err instanceof Error ? err.message : String(err)
+      }
+      web = null
+      webOpened = false
+      settle(null)
+    })()
+
+    return ready
+  })()
+  const started = await webStarting
+  webStarting = null
+
+  return started
+}
+
+async function pushWeb($: Pick<EngineInterface, 'http'>, payload: string): Promise<void> {
+  if (!web) return
+  await $.http.fetch(`${web.url}/state`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-wv-token': web.token }, body: payload }).catch(() => undefined)
+}
+
+async function stopWeb($: Pick<EngineInterface, 'http'>): Promise<boolean> {
+  if (!web) return false
+  const { url, token } = web
+  web = null
+  webOpened = false
+  await $.http.fetch(`${url}/quit`, { method: 'POST', headers: { 'x-wv-token': token } }).catch(() => undefined)
+
+  return true
+}
+
+async function openBrowser($: Pick<EngineInterface, 'process'>, url: string): Promise<void> {
+  if (webOpened) return
+  webOpened = true
+  for (const argv of openCommands(url)) {
+    const ran = await $.process.run(argv, { timeoutMs: 5000 }).catch(() => null)
+    if (ran && ran.exitCode === 0) return
+  }
+}
 
 /** `$.ui.open`'s word for a session nothing draws (a -p run, the SDK, a chat client without a terminal). */
 const noSurface = (reason: string | undefined): boolean => (reason ?? '').startsWith('no-surface')
@@ -261,7 +336,7 @@ function loopPrompt(args: string, language: Language, autonomy: string): string 
   ].join('\n')
 }
 
-const SUBCOMMANDS = ['loop', 'report', 'objectives', 'jira', 'help', 'config', 'rack'] as const
+const SUBCOMMANDS = ['loop', 'report', 'objectives', 'jira', 'help', 'config', 'rack', 'web'] as const
 type Subcommand = (typeof SUBCOMMANDS)[number] | 'open' | 'ask' | 'unknown'
 
 /** Edit distance, for forgiving a typo in a subcommand (`objetives`, `cofig`). */
@@ -326,6 +401,7 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
           `${t.versionLine(VERSION)} — subcomandos:`,
           '/wv            abre el pane del rack',
           '/wv rack       imprime el rack como texto (para clientes sin pane, p. ej. un chat)',
+          '/wv web [stop] rack en vivo en el navegador (server local); arranca solo en sesiones sin pane',
           '/wv loop <tickets>   corre la orquestación loop-mode sobre esos tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   reporte de productividad (tokens, costo, por modelo/workflow/ticket, sprint)',
           '/wv jira       estado de la conexión con Jira y el sprint abierto del proyecto configurado',
@@ -338,6 +414,7 @@ function helpText(t: Strings, language: Language, autonomy: string): string {
           `${t.versionLine(VERSION)} — subcommands:`,
           '/wv            open the rack pane',
           '/wv rack       print the rack as text (for clients without panes, e.g. a chat)',
+          '/wv web [stop] live rack in the browser (local server); starts by itself in sessions without panes',
           '/wv loop <tickets>   run the loop-mode orchestration over those tickets (Jira/Linear)',
           '/wv report [today|7d|30d|all] [save]   productivity report (tokens, cost, by model/workflow/ticket, sprint)',
           '/wv jira       Jira connection status and the open sprint of the configured project',
@@ -562,11 +639,28 @@ async function rackSnapshot($: SnapshotDollar, t: Strings, language: Language): 
   return { now, language, main, agents, session, tickets, objectives, branch: catalog?.branch ?? null }
 }
 
+/**
+ * The live rack where it belongs: started when asked (/wv web), or by itself in `auto` mode in a
+ * session nothing draws (no surface attached). Answers the line for the person, or '' when there is
+ * nothing to say.
+ */
+async function ensureWeb($: WebDollar & SnapshotDollar, t: Strings, language: Language, mode: WebMode, asked: boolean): Promise<string> {
+  if (mode === 'off') return asked ? t.webOff : ''
+  if (!asked && (mode !== 'auto' || surfaces.length > 0)) return ''
+  const started = await startWeb($)
+  if (!started) return asked || webError ? t.webFailed(webError ?? 'timeout') : ''
+  await pushWeb($, webPayload(await rackSnapshot($, t, language), t))
+  void openBrowser($, started.url)
+
+  return t.webLive(started.url)
+}
+
 export const register: Register = (on, options) => {
   const language = asLanguage(options.language)
   const autonomy = options.autonomy === 'autonomous' ? 'autonomous' : 'hitl'
   const modelPolicy: ModelPolicy = options.modelPolicy === 'off' ? 'off' : 'auto'
   const paneAuto = options.pane !== 'manual'
+  const webMode: WebMode = options.web === 'off' ? 'off' : options.web === 'manual' ? 'manual' : 'auto'
   const t = strings(language)
   const jira: JiraConfig = {
     server: typeof options.jiraServer === 'string' && options.jiraServer ? options.jiraServer : 'claude.ai Atlassian',
@@ -577,6 +671,10 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     surfaces = e.surface ? [e.surface] : []
     paneWaiting = false
+    web = null
+    webStarting = null
+    webError = null
+    webOpened = false
     launchTurn = (text, context, onRefused) => {
       $.clock.after(0, () => {
         // The long instructions (the whole wv-ask script among them) go in as a hidden user row the
@@ -609,6 +707,7 @@ export const register: Register = (on, options) => {
         const now = await $.clock.now()
         const live = state.agents.some(isLive) || state.main?.status === 'running' || state.agents.some(a => isCoolingDown(a, now))
         if (live) await update($, tick, n => n + 1)
+        if (web) await pushWeb($, webPayload(await rackSnapshot($, t, language), t))
       })()
     })
 
@@ -625,7 +724,7 @@ export const register: Register = (on, options) => {
       `Loop runs default to ${autonomy === 'autonomous' ? 'autonomous mode' : 'human-in-the-loop mode'} ("/wv loop <tickets>"); the user can switch it per run.`,
       ...(modelPolicy === 'auto' ? ['When you spawn a subagent without naming a model, the plugin picks one from the task (research → haiku, implementation and tests → sonnet, review, architecture, UI and synthesis → opus) and shows the choice in the rack; name a model only when the task needs a specific one.'] : []),
       ...(e.surfaces.length === 0
-        ? [`This client attaches no drawing surface, so the rack pane cannot be shown here. Whenever a workflow or the agents you launched finish, and whenever the user asks about the rack or the agents, call the \`${RACK_TOOL}\` tool and paste its text verbatim inside a \`\`\`text block; never describe the rack from memory.`]
+        ? [`This client attaches no drawing surface, so the rack pane cannot be shown here. Whenever a workflow or the agents you launched finish, and whenever the user asks about the rack or the agents, call the \`${RACK_TOOL}\` tool and paste its text verbatim inside a \`\`\`text block; never describe the rack from memory.${web ? ` The live rack is also open in the browser at ${web.url}; mention that URL once when agents start.` : ''}`]
         : ['The Workflow Visualizer pane shows every agent live; keep status lines terse.']),
     ].join('\n')
 
@@ -644,7 +743,7 @@ export const register: Register = (on, options) => {
     const note = resolved.corrected ? ` ${t.interpretedAs(sub)}` : ''
     if (sub === 'loop') {
       const seat = await openPane($, t.paneTitle, true, paneAuto)
-      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? t.paneNoSurface : t.paneWaiting(seat.reason ?? '')}`
+      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? `${t.paneNoSurface} ${await ensureWeb($, t, language, webMode, false)}` : t.paneWaiting(seat.reason ?? '')}`
       const prompt = loopPrompt(rest.join(' '), language, autonomy)
       if (!launchTurn) return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, context: [prompt] }
       launchTurn(`${t.loopStarting(rest.join(' '))} (/wv loop)`, [prompt], t.launchRefused)
@@ -652,6 +751,11 @@ export const register: Register = (on, options) => {
       return { text: `${t.loopStarting(rest.join(' '))}${note}${seatNote}`, isTextDisplayOnly: true }
     }
     if (sub === 'help') return { text: helpText(t, language, autonomy), isTextDisplayOnly: true }
+    if (sub === 'web') {
+      if (rest[0]?.toLowerCase() === 'stop') return { text: (await stopWeb($)) ? t.webStopped : t.webNotRunning, isTextDisplayOnly: true }
+
+      return { text: (await ensureWeb($, t, language, webMode, true)) || t.webNotRunning, isTextDisplayOnly: true }
+    }
     if (sub === 'rack') return { text: fenced(renderRackText(await rackSnapshot($, t, language), e.presentation?.columns ?? 84)), isTextDisplayOnly: true }
     if (sub === 'config') return { text: t.configHint, isTextDisplayOnly: true }
     if (sub === 'ask') {
@@ -662,7 +766,7 @@ export const register: Register = (on, options) => {
       const askArgs: AskArgs = { request: args, language, repoRoot: repo?.root ?? (await $.session.cwd()), jiraProject: jira.project, jiraServer: jira.server }
       // The user asked for this run: seat the pane now, with focus, instead of waiting for the Workflow call.
       const seat = await openPane($, t.paneTitle, true, paneAuto)
-      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? t.paneNoSurface : t.paneWaiting(seat.reason ?? '')}`
+      const seatNote = seat.isPlaced ? '' : `\n${noSurface(seat.reason) ? `${t.paneNoSurface} ${await ensureWeb($, t, language, webMode, false)}` : t.paneWaiting(seat.reason ?? '')}`
       // The script travels verbatim in the hidden context: a file under the repo could be swapped
       // or symlinked between the write and the Workflow run, and the engine would execute it.
       const prompt = launchPrompt(args, language, askArgs)
@@ -745,7 +849,11 @@ export const register: Register = (on, options) => {
       return { text: md, isTextDisplayOnly: true }
     }
     const seat = await openPane($, t.paneTitle, true, paneAuto)
-    if (!seat.isPlaced && noSurface(seat.reason)) return { text: `${t.paneNoSurface}\n\n${fenced(renderRackText(await rackSnapshot($, t, language), e.presentation?.columns ?? 84))}`, isTextDisplayOnly: true }
+    if (!seat.isPlaced && noSurface(seat.reason)) {
+      const liveNote = await ensureWeb($, t, language, webMode, false)
+
+      return { text: `${t.paneNoSurface}${liveNote ? ` ${liveNote}` : ''}\n\n${fenced(renderRackText(await rackSnapshot($, t, language), e.presentation?.columns ?? 84))}`, isTextDisplayOnly: true }
+    }
 
     return { text: paneAuto ? t.paneOpened : `${t.paneOpened} ${t.paneManual}`, isTextDisplayOnly: true }
     } catch (err) {
@@ -763,6 +871,7 @@ export const register: Register = (on, options) => {
     }
     await update($, rack, s => ({ ...s, runs: capRuns([...s.runs, run]) }))
     void openPane($, t.paneTitle, false, paneAuto)
+    void ensureWeb($, t, language, webMode, false)
     $.ui.toast(t.workflowEnters(run.name))
 
     return next(e)
@@ -778,6 +887,7 @@ export const register: Register = (on, options) => {
 
     const runKey = e.workflow ? e.tool_use_id : SOLO
     void openPane($, t.paneTitle, false, paneAuto)
+    void ensureWeb($, t, language, webMode, false)
     const agent: RackAgent = {
       id: started.agentId,
       runKey,
