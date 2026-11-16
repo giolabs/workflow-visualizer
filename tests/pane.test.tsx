@@ -378,7 +378,7 @@ test('without a surface the live rack server starts by itself at the first agent
   expect(spawned).toHaveLength(1)
   expect(spawned[0]![0]).toBe('node')
   expect(spawned[0]![1]).toMatch(/\/web\/server\.mjs$/)
-  expect(ran[0]).toEqual(['open', 'http://127.0.0.1:4321'])
+  expect(ran[0]).toEqual(['open', 'http://127.0.0.1:4321/?t=abcdef0123456789abcdef01'])
   const first = posted.find(p => p.url === 'http://127.0.0.1:4321/state')
   expect(first?.method).toBe('POST')
   expect(first?.token).toBe('abcdef0123456789abcdef01')
@@ -392,7 +392,7 @@ test('without a surface the live rack server starts by itself at the first agent
 
   // /wv says where it is; a second agent starts no second server.
   const open = await $.command.run(WV)
-  expect(open.text).toMatch(/http:\/\/127\.0\.0\.1:4321/)
+  expect(open.text).toMatch(/http:\/\/127\.0\.0\.1:4321\/\?t=abcdef0123456789abcdef01/)
   await $.agent.spawn({ ...SPAWN, tool_use_id: 'tu-2', description: 'git researcher' })
   expect(spawned).toHaveLength(1)
 

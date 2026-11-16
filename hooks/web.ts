@@ -15,5 +15,8 @@ export function webPayload(props: RackProps, t: Strings): string {
   return JSON.stringify({ props, labels: t })
 }
 
+/** The URL the person opens: the token travels once in it and stays as a cookie (server.mjs). */
+export const webLink = (web: { url: string; token: string }): string => `${web.url}/?t=${web.token}`
+
 /** The command that opens a URL in the person's browser, by platform. */
 export const openCommands = (url: string): readonly (readonly string[])[] => [['open', url], ['xdg-open', url], ['cmd', '/c', 'start', '', url]]

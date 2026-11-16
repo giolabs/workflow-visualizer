@@ -9,7 +9,7 @@ import { priceOf, usdOf } from '../hooks/pricing'
 import { fit, spark, wrap } from '../hooks/rack-client'
 import { RACK_FAULTS_MAX, faulted, freshSlot, slotKey } from '../hooks/rack-slot'
 import { PROPS_BUDGET, fitProps, propsSize, slim } from '../hooks/rack-props'
-import { openCommands, parseListening } from '../hooks/web'
+import { openCommands, parseListening, webLink } from '../hooks/web'
 import { base, clip, sanitize, workflowName } from '../hooks/text'
 import { cell, isTicketKey, table } from '../hooks/history'
 
@@ -312,4 +312,5 @@ test('the live rack server line is read for its URL and token, nothing else', ()
   expect(parseListening('listening http://0.0.0.0:80 token=abc')).toBeNull()
   expect(parseListening('node: command not found')).toBeNull()
   expect(openCommands('http://127.0.0.1:1')[0]).toEqual(['open', 'http://127.0.0.1:1'])
+  expect(webLink({ url: 'http://127.0.0.1:1', token: 'ab' })).toBe('http://127.0.0.1:1/?t=ab')
 })
